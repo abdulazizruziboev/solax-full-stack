@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Prisma Client types are generated, not committed — typecheck/build need them.
+      - name: Generate Prisma client
+        run: pnpm --filter @solax/db generate
+
+      - name: Lint
+        run: pnpm --filter web lint
+
+      - name: Typecheck (web + worker)
+        run: pnpm --filter web typecheck && pnpm --filter worker typecheck
+
+      - name: Unit tests (analysis engine)
+        run: pnpm --filter worker test
+
+      # Next build catches issues typecheck can't. Dynamic pages don't touch the
+      # DB at build time, so placeholder env vars are enough to compile.
+      - name: Build web
+        run: pnpm --filter web build
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          REDIS_URL: redis://localhost:6379
+          AUTH_SECRET: ci-placeholder-secret-not-used-at-runtime
+          NEXTAUTH_SECRET: ci-placeholder-secret-not-used-at-runtime
+          NEXTAUTH_URL: http://localhost:3000

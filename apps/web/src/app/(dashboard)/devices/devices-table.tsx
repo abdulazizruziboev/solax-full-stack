@@ -51,6 +51,41 @@ export interface DeviceRow {
 type SortField = "name" | "power" | "yield" | "lastSeen"
 type SortDir = "asc" | "desc"
 
+// Top-level (not defined during render) so it keeps a stable identity across
+// renders — React treats an inline component as a brand-new type each render.
+function SortHeader({
+  field,
+  sortField,
+  sortDir,
+  onToggle,
+  children,
+  className,
+}: {
+  field: SortField
+  sortField: SortField
+  sortDir: SortDir
+  onToggle: (f: SortField) => void
+  children: React.ReactNode
+  className?: string
+}) {
+  const active = sortField === field
+  const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(field)}
+      className={cn(
+        "flex items-center gap-1 text-left transition-colors hover:text-foreground",
+        active ? "text-foreground" : "",
+        className
+      )}
+    >
+      {children}
+      <Icon className={cn("size-3", active ? "opacity-100" : "opacity-40")} />
+    </button>
+  )
+}
+
 export function DevicesTable({
   devices,
 }: {
@@ -119,25 +154,6 @@ export function DevicesTable({
     return rows
   }, [devices, query, statusFilter, sortField, sortDir])
 
-  function SortHeader({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) {
-    const active = sortField === field
-    const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown
-    return (
-      <button
-        type="button"
-        onClick={() => toggleSort(field)}
-        className={cn(
-          "flex items-center gap-1 text-left transition-colors hover:text-foreground",
-          active ? "text-foreground" : "",
-          className
-        )}
-      >
-        {children}
-        <Icon className={cn("size-3", active ? "opacity-100" : "opacity-40")} />
-      </button>
-    )
-  }
-
   const filters: { value: string; label: string }[] = [
     { value: "ALL", label: "Barchasi" },
     { value: "ONLINE", label: "Onlayn" },
@@ -204,23 +220,27 @@ export function DevicesTable({
         <TableHeader>
           <TableRow>
             <TableHead>
-              <SortHeader field="name">Nom</SortHeader>
+              <SortHeader field="name" sortField={sortField} sortDir={sortDir} onToggle={toggleSort}>
+                Nom
+              </SortHeader>
             </TableHead>
             <TableHead>SN</TableHead>
             <TableHead>Plant</TableHead>
             <TableHead className="text-right">
-              <SortHeader field="power" className="ml-auto justify-end">
+              <SortHeader field="power" sortField={sortField} sortDir={sortDir} onToggle={toggleSort} className="ml-auto justify-end">
                 Quvvat
               </SortHeader>
             </TableHead>
             <TableHead className="text-right">
-              <SortHeader field="yield" className="ml-auto justify-end">
+              <SortHeader field="yield" sortField={sortField} sortDir={sortDir} onToggle={toggleSort} className="ml-auto justify-end">
                 Bugun
               </SortHeader>
             </TableHead>
             <TableHead>Holat</TableHead>
             <TableHead>
-              <SortHeader field="lastSeen">Oxirgi ko&apos;rilgan</SortHeader>
+              <SortHeader field="lastSeen" sortField={sortField} sortDir={sortDir} onToggle={toggleSort}>
+                Oxirgi ko&apos;rilgan
+              </SortHeader>
             </TableHead>
             <TableHead className="w-10" />
           </TableRow>

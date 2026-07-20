@@ -1,0 +1,88 @@
+# Production stack. Bring up with:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# HTTPS reverse proxy is opt-in via the "proxy" profile (needs DOMAIN in .env):
+#   docker compose -f docker-compose.prod.yml --profile proxy up -d --build
+#
+# In .env on the server, point the app at the compose service names:
+#   DATABASE_URL="postgresql://solax:<pass>@postgres:5432/solax"
+#   REDIS_URL="redis://redis:6379"
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: solax_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-solax}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-solax}
+    volumes:
+      - solax_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-solax} -d ${POSTGRES_DB:-solax}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: solax_redis
+    restart: unless-stopped
+    volumes:
+      - solax_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: solax_web
+    restart: unless-stopped
+    env_file: .env
+    # Bound to localhost — Caddy (or another reverse proxy) fronts it publicly.
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: solax_worker
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: solax_caddy
+    restart: unless-stopped
+    profiles: ["proxy"]
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  solax_pg_data:
+  solax_redis_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+.git
+.github
+backups
+*.log
+**/*.tsbuildinfo
+scratchpad
+# Never bake secrets/local config into the image — runtime env comes from
+# docker compose (env_file / environment). A baked .env would also override
+# real container env because the worker loads it with override:true.
+.env
+**/.env
+!.env.example

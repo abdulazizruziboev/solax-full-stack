@@ -7,7 +7,9 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "worker": "pnpm --filter worker dev"
+    "worker": "pnpm --filter worker dev",
+    "typecheck": "pnpm --filter @solax/db generate && pnpm --filter web typecheck && pnpm --filter worker typecheck",
+    "test": "pnpm --filter worker test"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

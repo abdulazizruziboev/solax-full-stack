@@ -1,0 +1,7 @@
+# Auto-HTTPS reverse proxy. Set DOMAIN in .env (e.g. solax.example.com) with an
+# A record pointing at the VPS; Caddy fetches and renews the TLS cert itself.
+# Falls back to :80 if DOMAIN is unset.
+{$DOMAIN::80} {
+	encode gzip
+	reverse_proxy web:3000
+}

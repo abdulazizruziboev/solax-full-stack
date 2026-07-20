@@ -7,6 +7,9 @@ import { loginSchema } from "@solax/shared"
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
+  // The app runs behind a reverse proxy (Caddy) in production, so Auth.js must
+  // trust the forwarded host instead of rejecting it as UntrustedHost.
+  trustHost: true,
   providers: [
     Credentials({
       credentials: {

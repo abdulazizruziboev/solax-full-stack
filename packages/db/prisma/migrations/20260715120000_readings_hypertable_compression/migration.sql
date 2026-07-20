@@ -9,10 +9,13 @@
 --   psql "$DATABASE_URL" -f migration.sql
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
+-- migrate_data => false keeps this transaction-safe for `prisma migrate deploy`
+-- (Prisma wraps each migration in a transaction; migrate_data => true cannot run
+-- in one). On a fresh deploy the table is empty, so there is nothing to migrate.
 SELECT create_hypertable(
   'readings', 'ts',
   chunk_time_interval => INTERVAL '1 day',
-  migrate_data => true,
+  migrate_data => false,
   if_not_exists => true
 );
 
