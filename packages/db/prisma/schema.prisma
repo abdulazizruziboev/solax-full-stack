@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  VIEWER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         UserRole @default(VIEWER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  ALARM
+  UNKNOWN
+}
+
+model Device {
+  id         String       @id @default(cuid())
+  sn         String       @unique // Registration No (Wi-Fi/LAN dongle SN) — used for SolaxCloud API queries
+  inverterSn String?      // Inverter's own serial number — display/reference only
+  tokenId    String?
+  name       String
+  plantName  String?
+  status     DeviceStatus @default(UNKNOWN)
+  lastSeenAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  readings        Reading[]
+  alarms          Alarm[]
+  dailySummaries  DailySummary[]
+  stringBaselines StringBaseline[]
+  dailyAnalyses   DailyAnalysis[]
+
+  @@index([status])
+  @@map("devices")
+}
+
+model Reading {
+  id          BigInt   @default(autoincrement())
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  ts          DateTime @default(now())
+  acPower     Float?
+  yieldToday  Float?
+  yieldTotal  Float?
+  batterySoc  Float?
+  gridPower   Float?
+  feedInPower Float?
+  raw         Json?
+
+  @@id([id, ts])
+  @@index([deviceId, ts])
+  @@map("readings")
+}
+
+// One row per device per calendar day, computed at Uzbekistan sunset.
+model DailySummary {
+  id            String   @id @default(cuid())
+  deviceId      String
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  date          DateTime @db.Date
+  totalYieldKwh Float?
+  peakAcPowerW  Float?
+  offlineCount  Int      @default(0)
+  alarmCount    Int      @default(0)
+  wasOnline     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@unique([deviceId, date])
+  @@index([date])
+  @@map("daily_summaries")
+}
+
+enum AlarmSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+// What produced an alarm — lets the UI/operator triage system faults vs
+// data-quality noise vs real performance/hardware findings.
+enum AlarmCategory {
+  SYSTEM       // offline, API error, inverter fault code
+  DATA_QUALITY // missing data, frozen sensor
+  PERFORMANCE  // low yield vs peers, low PR
+  STRING       // string current imbalance
+  FUSE         // suspected blown fuse / open string
+}
+
+model Alarm {
+  id         String        @id @default(cuid())
+  deviceId   String
+  device     Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  ts         DateTime      @default(now())
+  code       String
+  message    String
+  severity   AlarmSeverity @default(WARNING)
+  category   AlarmCategory @default(SYSTEM)
+  // Set once the operator alert (Telegram) has been delivered, so we never
+  // notify twice for the same open alarm.
+  notifiedAt DateTime?
+  resolvedAt DateTime?
+
+  @@index([deviceId, ts])
+  @@index([resolvedAt])
+  @@map("alarms")
+}
+
+// Learned "normal portrait" of one MPPT string (powerdc/idc index) on a device.
+// Built during a baseline window before alerting, then refreshed slowly. Peer
+// and fuse checks compare live values against this instead of a book constant.
+model StringBaseline {
+  id           String   @id @default(cuid())
+  deviceId     String
+  device       Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  stringIndex  Int      // 1..4 → powerdc{n}/idc{n}
+  // Median share of this string's current relative to the device's string
+  // average, over high-irradiance samples (the string's expected fraction).
+  medianShare  Float
+  // Robust spread (MAD) of that share — sets the per-string alert threshold.
+  madShare     Float
+  sampleCount  Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([deviceId, stringIndex])
+  @@map("string_baselines")
+}
+
+// One row per device per day: the layer-3/4 analytics output.
+model DailyAnalysis {
+  id                 String   @id @default(cuid())
+  deviceId           String
+  device             Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  date               DateTime @db.Date
+  // Layer 1
+  completenessPct    Float?   // % of expected polls that arrived
+  // Layer 3
+  specificYield      Float?   // kWh per kWp
+  peerMedianYield    Float?   // peer group median specific yield that day
+  performanceIndex   Float?   // specificYield / peerMedianYield (1.0 = at par)
+  expectedKwh        Float?
+  actualKwh          Float?
+  maxStringDevPct    Float?   // worst string deviation from its baseline share
+  // Findings for the day, e.g. ["STRING_IMBALANCE:2","LOW_YIELD"]
+  flags              String[] @default([])
+  createdAt          DateTime @default(now())
+
+  @@unique([deviceId, date])
+  @@index([date])
+  @@map("daily_analyses")
+}

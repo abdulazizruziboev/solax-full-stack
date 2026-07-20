@@ -1,0 +1,40 @@
+import { listDevicesWithLatestReading } from "@/server/devices"
+import { AddDeviceDialog } from "./add-device-dialog"
+import { DevicesTable } from "./devices-table"
+import { RefreshDevicesButton } from "./refresh-devices-button"
+import { DevicesPdfButton, type DevicePdfRow } from "./devices-pdf-button"
+
+export const dynamic = "force-dynamic"
+
+export default async function DevicesPage() {
+  const devices = await listDevicesWithLatestReading()
+
+  const pdfRows: DevicePdfRow[] = devices.map((d) => ({
+    name: d.name,
+    sn: d.sn,
+    plantName: d.plantName,
+    status: d.status,
+    acPowerW: d.latestReading?.acPower ?? null,
+    lastSeen: d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString("uz-UZ") : null,
+  }))
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold tracking-tight">Qurilmalar</h1>
+          <p className="text-muted-foreground text-sm">
+            Jami {devices.length} ta qurilma ro&apos;yxatdan o&apos;tgan
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <DevicesPdfButton rows={pdfRows} />
+          <RefreshDevicesButton />
+          <AddDeviceDialog />
+        </div>
+      </div>
+
+      <DevicesTable devices={devices} />
+    </div>
+  )
+}
