@@ -4,7 +4,8 @@ import { SolaxClient, SolaxApiError } from "@solax/solax-client"
 import { humanizeSolaxError } from "@solax/shared"
 import { connection, POLL_QUEUE_NAME, type PollJobData } from "./queue.js"
 import { env } from "./env.js"
-import { runLiveDetection, LIVE_DETECTION_CODES } from "./detection.js"
+import { runLiveDetection, LIVE_DETECTION_CODES, resolveDetectionAlarms } from "./detection.js"
+import { isReadingFresh } from "./freshness.js"
 
 const solaxClient = new SolaxClient({
   baseUrl: env.solaxBaseUrl,
@@ -19,6 +20,10 @@ async function handlePollJob(job: Job<PollJobData>): Promise<void> {
 
   try {
     const reading = await solaxClient.getRealtimeInfo(sn, tokenId ?? undefined)
+
+    // SolaxCloud returns stale last-known data for offline inverters, so the
+    // reading's own timestamp — not API success — decides online/offline.
+    const fresh = isReadingFresh(reading, env.staleMinutes)
 
     await prisma.$transaction([
       prisma.reading.create({
@@ -36,14 +41,12 @@ async function handlePollJob(job: Job<PollJobData>): Promise<void> {
       prisma.device.update({
         where: { id: deviceId },
         data: {
-          status: "ONLINE",
-          lastSeenAt: new Date(),
+          status: fresh ? "ONLINE" : "OFFLINE",
+          // lastSeenAt = last time the inverter actually reported fresh data.
+          ...(fresh ? { lastSeenAt: new Date() } : {}),
         },
       }),
-      // Device is reachable again — auto-resolve the offline/API-error alarms.
-      // Detection-owned codes (below) are reconciled separately so a real
-      // fault seen in the reading itself isn't wiped just because the poll
-      // succeeded.
+      // API reachable again — clear the offline/API-error (non-detection) alarms.
       prisma.alarm.updateMany({
         where: {
           deviceId,
@@ -54,10 +57,16 @@ async function handlePollJob(job: Job<PollJobData>): Promise<void> {
       }),
     ])
 
-    // Layers 1 & 2 on the fresh reading (creates/clears its own alarms).
-    await runLiveDetection(deviceId, reading)
+    // Layers 1 & 2 only make sense for an online inverter. For a stale/offline
+    // one, its data is frozen zeros by definition — running the checks would
+    // spam false ZERO_CURRENT_DAY / FROZEN alarms, so we resolve them instead.
+    if (fresh) {
+      await runLiveDetection(deviceId, reading)
+    } else {
+      await resolveDetectionAlarms(deviceId)
+    }
 
-    console.log(`[processor] OK ${sn} acpower=${reading.acpower ?? "-"}W`)
+    console.log(`[processor] OK ${sn} acpower=${reading.acpower ?? "-"}W ${fresh ? "" : "(offline/stale)"}`)
   } catch (err) {
     await handlePollFailure(deviceId, sn, err)
     throw err

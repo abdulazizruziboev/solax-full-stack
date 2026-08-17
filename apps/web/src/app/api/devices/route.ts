@@ -1,24 +1,47 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/server/auth"
-import { listDevicesWithLatestReading, createDevice } from "@/server/devices"
+import { listDevicesPaginated, createDevice } from "@/server/devices"
 import { deviceCreateSchema } from "@solax/shared"
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth()
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const devices = await listDevicesWithLatestReading()
+  const { searchParams } = new URL(request.url)
+  const page = parseInt(searchParams.get("page") ?? "1", 10)
+  const limit = parseInt(searchParams.get("limit") ?? "20", 10)
+  const query = searchParams.get("query") ?? ""
+  const status = searchParams.get("status") ?? "ALL"
+  const sortField = (searchParams.get("sortField") as any) ?? "name"
+  const sortDir = (searchParams.get("sortDir") as any) ?? "asc"
 
-  return NextResponse.json({
-    devices: devices.map((d) => ({
-      ...d,
-      latestReading: d.latestReading
-        ? { ...d.latestReading, id: d.latestReading.id.toString() }
-        : null,
-    })),
+  const result = await listDevicesPaginated({
+    page,
+    limit,
+    query,
+    status,
+    sortField,
+    sortDir,
   })
+
+  return NextResponse.json(
+    {
+      ...result,
+      devices: result.devices.map((d) => ({
+        ...d,
+        latestReading: d.latestReading
+          ? { ...d.latestReading, id: d.latestReading.id.toString() }
+          : null,
+      })),
+    },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=5, stale-while-revalidate=15",
+      },
+    }
+  )
 }
 
 export async function POST(request: Request) {

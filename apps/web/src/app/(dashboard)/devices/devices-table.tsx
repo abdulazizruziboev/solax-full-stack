@@ -1,16 +1,16 @@
-"use client"
-
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { formatDistanceToNow } from "date-fns"
 import { uz } from "date-fns/locale"
-import { MoreHorizontal, Pencil, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { MoreHorizontal, Pencil, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DeviceStatusBadge } from "@/components/status-indicator"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll"
 import {
   Table,
   TableBody,
@@ -51,8 +51,6 @@ export interface DeviceRow {
 type SortField = "name" | "power" | "yield" | "lastSeen"
 type SortDir = "asc" | "desc"
 
-// Top-level (not defined during render) so it keeps a stable identity across
-// renders — React treats an inline component as a brand-new type each render.
 function SortHeader({
   field,
   sortField,
@@ -87,72 +85,129 @@ function SortHeader({
 }
 
 export function DevicesTable({
-  devices,
+  initialDevices = [],
+  initialTotal = 0,
+  initialHasMore = false,
 }: {
-  devices: (DeviceRow & { tokenId?: string | null })[]
+  initialDevices?: (DeviceRow & { tokenId?: string | null })[]
+  initialTotal?: number
+  initialHasMore?: boolean
 }) {
   const router = useRouter()
+  const [items, setItems] = useState<(DeviceRow & { tokenId?: string | null })[]>(initialDevices)
+  const [totalCount, setTotalCount] = useState(initialTotal)
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(initialHasMore)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+
   const [editing, setEditing] = useState<EditableDevice | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [deleting, setDeleting] = useState<DeviceRow | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("ALL")
   const [sortField, setSortField] = useState<SortField>("name")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
 
+  // Debounced search query
+  const [debouncedQuery, setDebouncedQuery] = useState("")
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  // Count status types from loaded items
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: devices.length }
-    for (const d of devices) counts[d.status] = (counts[d.status] ?? 0) + 1
+    const counts: Record<string, number> = { ALL: totalCount }
+    for (const d of items) counts[d.status] = (counts[d.status] ?? 0) + 1
     return counts
-  }, [devices])
+  }, [items, totalCount])
+
+  // Fetch page 1 when search/filter/sort changes
+  const fetchFirstPage = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const params = new URLSearchParams({
+        page: "1",
+        limit: "20",
+        query: debouncedQuery.trim(),
+        status: statusFilter,
+        sortField,
+        sortDir,
+      })
+      const res = await fetch(`/api/devices?${params.toString()}`)
+      const data = await res.json()
+      if (res.ok && data.devices) {
+        setItems(data.devices)
+        setTotalCount(data.total ?? data.devices.length)
+        setPage(1)
+        setHasMore(data.hasMore ?? false)
+      }
+    } catch (err) {
+      console.error("Qurilmalarni yuklashda xatolik:", err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [debouncedQuery, statusFilter, sortField, sortDir])
+
+  // Re-fetch initial page on filter change (skip first render if using initial props)
+  const [isFirstRender, setIsFirstRender] = useState(true)
+  useEffect(() => {
+    if (isFirstRender) {
+      setIsFirstRender(false)
+      return
+    }
+    fetchFirstPage()
+  }, [debouncedQuery, statusFilter, sortField, sortDir, fetchFirstPage])
+
+  // Load next batch on scroll
+  const loadMore = useCallback(async () => {
+    if (isLoadingMore || !hasMore || isLoading) return
+    setIsLoadingMore(true)
+    try {
+      const nextPage = page + 1
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        limit: "20",
+        query: debouncedQuery.trim(),
+        status: statusFilter,
+        sortField,
+        sortDir,
+      })
+      const res = await fetch(`/api/devices?${params.toString()}`)
+      const data = await res.json()
+      if (res.ok && data.devices) {
+        setItems((prev) => {
+          const existing = new Set(prev.map((d) => d.sn))
+          const newUnique = data.devices.filter((d: DeviceRow) => !existing.has(d.sn))
+          return [...prev, ...newUnique]
+        })
+        setPage(nextPage)
+        setHasMore(data.hasMore ?? false)
+      }
+    } catch (err) {
+      console.error("Keyingi sahifani yuklashda xatolik:", err)
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }, [page, isLoadingMore, hasMore, isLoading, debouncedQuery, statusFilter, sortField, sortDir])
+
+  const { sentinelRef } = useInfiniteScroll({
+    onLoadMore: loadMore,
+    hasMore,
+    isLoading: isLoading || isLoadingMore,
+  })
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"))
     } else {
       setSortField(field)
-      // Numeric/time columns read best largest-first on first click.
       setSortDir(field === "name" ? "asc" : "desc")
     }
   }
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const rows = devices.filter((d) => {
-      if (statusFilter !== "ALL" && d.status !== statusFilter) return false
-      if (!q) return true
-      return (
-        d.name.toLowerCase().includes(q) ||
-        d.sn.toLowerCase().includes(q) ||
-        (d.plantName ?? "").toLowerCase().includes(q)
-      )
-    })
-
-    const dir = sortDir === "asc" ? 1 : -1
-    rows.sort((a, b) => {
-      switch (sortField) {
-        case "power": {
-          const av = a.latestReading?.acPower ?? -1
-          const bv = b.latestReading?.acPower ?? -1
-          return (av - bv) * dir
-        }
-        case "yield": {
-          const av = a.latestReading?.yieldToday ?? -1
-          const bv = b.latestReading?.yieldToday ?? -1
-          return (av - bv) * dir
-        }
-        case "lastSeen": {
-          const av = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : 0
-          const bv = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : 0
-          return (av - bv) * dir
-        }
-        default:
-          return a.name.localeCompare(b.name, "uz") * dir
-      }
-    })
-    return rows
-  }, [devices, query, statusFilter, sortField, sortDir])
 
   const filters: { value: string; label: string }[] = [
     { value: "ALL", label: "Barchasi" },
@@ -178,6 +233,7 @@ export function DevicesTable({
 
       toast.success("Qurilma o'chirildi")
       setDeleting(null)
+      fetchFirstPage()
       router.refresh()
     } finally {
       setDeletePending(false)
@@ -210,44 +266,47 @@ export function DevicesTable({
               )}
             >
               {f.label}
-              <span className="ml-1 text-muted-foreground">{statusCounts[f.value] ?? 0}</span>
+              {statusCounts[f.value] != null && (
+                <span className="ml-1 text-muted-foreground">{statusCounts[f.value]}</span>
+              )}
             </button>
           ))}
         </div>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>
-              <SortHeader field="name" sortField={sortField} sortDir={sortDir} onToggle={toggleSort}>
-                Nom
-              </SortHeader>
-            </TableHead>
-            <TableHead>SN</TableHead>
-            <TableHead>Plant</TableHead>
-            <TableHead className="text-right">
-              <SortHeader field="power" sortField={sortField} sortDir={sortDir} onToggle={toggleSort} className="ml-auto justify-end">
-                Quvvat
-              </SortHeader>
-            </TableHead>
-            <TableHead className="text-right">
-              <SortHeader field="yield" sortField={sortField} sortDir={sortDir} onToggle={toggleSort} className="ml-auto justify-end">
-                Bugun
-              </SortHeader>
-            </TableHead>
-            <TableHead>Holat</TableHead>
-            <TableHead>
-              <SortHeader field="lastSeen" sortField={sortField} sortDir={sortDir} onToggle={toggleSort}>
-                Oxirgi ko&apos;rilgan
-              </SortHeader>
-            </TableHead>
-            <TableHead className="w-10" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-            {filtered.map((device) => (
-              <TableRow key={device.id}>
+      <div className="relative rounded-md border border-neutral-100 dark:border-neutral-800">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>
+                <SortHeader field="name" sortField={sortField} sortDir={sortDir} onToggle={toggleSort}>
+                  Nom
+                </SortHeader>
+              </TableHead>
+              <TableHead>SN</TableHead>
+              <TableHead>Plant</TableHead>
+              <TableHead className="text-right">
+                <SortHeader field="power" sortField={sortField} sortDir={sortDir} onToggle={toggleSort} className="ml-auto justify-end">
+                  Quvvat
+                </SortHeader>
+              </TableHead>
+              <TableHead className="text-right">
+                <SortHeader field="yield" sortField={sortField} sortDir={sortDir} onToggle={toggleSort} className="ml-auto justify-end">
+                  Bugun
+                </SortHeader>
+              </TableHead>
+              <TableHead>Holat</TableHead>
+              <TableHead>
+                <SortHeader field="lastSeen" sortField={sortField} sortDir={sortDir} onToggle={toggleSort}>
+                  Oxirgi ko&apos;rilgan
+                </SortHeader>
+              </TableHead>
+              <TableHead className="w-10" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((device) => (
+              <TableRow key={device.id} className="transition-colors hover:bg-muted/50">
                 <TableCell>
                   <Link
                     href={`/devices/${encodeURIComponent(device.sn)}`}
@@ -264,13 +323,11 @@ export function DevicesTable({
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {device.latestReading?.acPower != null ? (
-                    <>
-                      <span className="font-medium">
-                        {device.latestReading.acPower >= 1000
-                          ? `${(device.latestReading.acPower / 1000).toFixed(1)} kW`
-                          : `${device.latestReading.acPower.toFixed(0)} W`}
-                      </span>
-                    </>
+                    <span className="font-medium">
+                      {device.latestReading.acPower >= 1000
+                        ? `${(device.latestReading.acPower / 1000).toFixed(1)} kW`
+                        : `${device.latestReading.acPower.toFixed(0)} W`}
+                    </span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
@@ -341,10 +398,29 @@ export function DevicesTable({
                 </TableCell>
               </TableRow>
             ))}
-            {filtered.length === 0 && (
+
+            {/* Skeleton Loading Rows when fetching next page */}
+            {isLoadingMore && (
+              <>
+                {[1, 2, 3].map((idx) => (
+                  <TableRow key={`skeleton-${idx}`} className="animate-pulse opacity-70">
+                    <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell><Skeleton className="ml-auto h-4 w-14" /></TableCell>
+                    <TableCell><Skeleton className="ml-auto h-4 w-12" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                  </TableRow>
+                ))}
+              </>
+            )}
+
+            {!isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground text-center py-12">
-                  {devices.length === 0
+                <TableCell colSpan={8} className="text-muted-foreground py-12 text-center">
+                  {totalCount === 0
                     ? "Hali qurilma qo'shilmagan"
                     : "Qidiruv/filtr bo'yicha qurilma topilmadi"}
                 </TableCell>
@@ -352,6 +428,24 @@ export function DevicesTable({
             )}
           </TableBody>
         </Table>
+
+        {/* Sentinel Trigger Element for YouTube-style infinite scroll */}
+        <div ref={sentinelRef} className="h-4 w-full" />
+      </div>
+
+      {/* Infinite Scroll Footer Info */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+        <span>Yuklandi: {items.length} / {totalCount} ta qurilma</span>
+        {isLoadingMore && (
+          <span className="flex items-center gap-1.5 text-primary font-medium">
+            <Loader2 className="size-3.5 animate-spin" />
+            Yangi qurilmalar yuklanmoqda...
+          </span>
+        )}
+        {!hasMore && items.length > 0 && (
+          <span>Barcha qurilmalar yuklandi</span>
+        )}
+      </div>
 
       <EditDeviceDialog device={editing} open={editOpen} onOpenChange={setEditOpen} />
 
@@ -380,3 +474,4 @@ export function DevicesTable({
     </>
   )
 }
+

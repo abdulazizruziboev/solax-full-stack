@@ -68,6 +68,7 @@ model Reading {
 
   @@id([id, ts])
   @@index([deviceId, ts])
+  @@index([ts])
   @@map("readings")
 }
 

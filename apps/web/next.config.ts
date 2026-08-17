@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
   experimental: {
     turbopackSourceMaps: false,
     serverSourceMaps: false,
+    optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
   },
 };
 

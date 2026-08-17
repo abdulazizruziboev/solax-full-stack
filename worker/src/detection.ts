@@ -40,6 +40,18 @@ function num(raw: Record<string, unknown>, key: string): number | null {
 }
 
 /**
+ * Resolve all open live-detection alarms for a device — used when the device is
+ * offline/stale, where its frozen zero data would otherwise trigger false
+ * ZERO_CURRENT_DAY / FROZEN alarms. Offline is a status, not a fault alarm.
+ */
+export async function resolveDetectionAlarms(deviceId: string): Promise<void> {
+  await prisma.alarm.updateMany({
+    where: { deviceId, resolvedAt: null, code: { in: [...LIVE_DETECTION_CODES] } },
+    data: { resolvedAt: new Date() },
+  })
+}
+
+/**
  * Reconcile the live-check alarms for one device against the latest reading.
  * Each code is create-if-present / resolve-if-absent, so alarms clear
  * automatically once the underlying issue goes away.

@@ -1,13 +1,26 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ChevronLeft } from "lucide-react"
+import dynamicImport from "next/dynamic"
 import { getDeviceReadings, getDeviceAnalysis } from "@/server/devices"
 import { DeviceStatusBadge } from "@/components/status-indicator"
-import { ReadingChart } from "./reading-chart"
 import { LiveDevicePoll } from "./live-device-poll"
 import { DeviceMetrics } from "./device-metrics"
 import { DeviceAnalysis } from "./device-analysis"
-import { DevicePdfButton } from "./device-pdf-button"
+import { Skeleton } from "@/components/ui/skeleton"
+
+const ReadingChart = dynamicImport(
+  () => import("./reading-chart").then((mod) => mod.ReadingChart),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-[280px] w-full rounded-md" />,
+  }
+)
+
+const DevicePdfButton = dynamicImport(
+  () => import("./device-pdf-button").then((mod) => mod.DevicePdfButton),
+  { ssr: false }
+)
 
 export const dynamic = "force-dynamic"
 

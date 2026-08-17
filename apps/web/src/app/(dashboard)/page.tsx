@@ -5,14 +5,23 @@ import {
   getFleetPowerCurve,
   getTopProducersToday,
   listAlarms,
-  listDevicesWithLatestReading,
+  listDevicesPaginated,
 } from "@/server/devices"
+import dynamicImport from "next/dynamic"
 import { StatCard } from "./stat-card"
-import { FleetPowerChart } from "./fleet-power-chart"
 import { StatusBreakdown } from "./status-breakdown"
 import { TopProducers } from "./top-producers"
 import { RecentAlarms } from "./recent-alarms"
 import { DeviceStatusBadge } from "@/components/status-indicator"
+import { Skeleton } from "@/components/ui/skeleton"
+
+const FleetPowerChart = dynamicImport(
+  () => import("./fleet-power-chart").then((mod) => mod.FleetPowerChart),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-[260px] w-full rounded-md" />,
+  }
+)
 
 export const dynamic = "force-dynamic"
 
@@ -46,13 +55,15 @@ function Panel({
 }
 
 export default async function DashboardPage() {
-  const [stats, curve, producers, activeAlarms, devices] = await Promise.all([
+  const [stats, curve, producers, activeAlarms, devicesResult] = await Promise.all([
     getDashboardStats(),
     getFleetPowerCurve(24),
     getTopProducersToday(5),
     listAlarms(true),
-    listDevicesWithLatestReading(),
+    listDevicesPaginated({ page: 1, limit: 8 }),
   ])
+
+  const devices = devicesResult.devices
 
   const onlinePct = stats.total > 0 ? Math.round((stats.online / stats.total) * 100) : 0
   const peakW = curve.reduce((max, p) => Math.max(max, p.totalW), 0)

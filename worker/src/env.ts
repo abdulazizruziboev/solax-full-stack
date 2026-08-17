@@ -29,4 +29,8 @@ export const env = {
   // (alarms are still stored and shown in the UI, just not pushed).
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
   telegramChatId: process.env.TELEGRAM_CHAT_ID ?? "",
+  // A device is considered OFFLINE if its latest SolaxCloud data timestamp
+  // (uploadTime) is older than this. SolaxCloud returns stale last-known data
+  // for offline inverters, so API success alone doesn't mean "online".
+  staleMinutes: Number(process.env.DEVICE_STALE_MINUTES ?? 30),
 }

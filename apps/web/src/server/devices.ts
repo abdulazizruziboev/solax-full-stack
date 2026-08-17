@@ -1,4 +1,5 @@
 import "server-only"
+import { unstable_cache } from "next/cache"
 import { prisma } from "@solax/db"
 import type { DeviceCreateInput, DeviceImportRow } from "@solax/shared"
 
@@ -26,46 +27,171 @@ export async function listDevicesWithLatestReading() {
   }))
 }
 
-export async function getDashboardStats() {
-  const [statusCounts, alarmCount, aggregate] = await Promise.all([
-    prisma.device.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.alarm.count({ where: { resolvedAt: null } }),
-    prisma.$queryRaw<
-      { total_ac_power: number | null; total_yield_today: number | null }[]
-    >`
-      SELECT
-        SUM(r."acPower") AS total_ac_power,
-        SUM(r."yieldToday") AS total_yield_today
-      FROM readings r
-      INNER JOIN (
-        SELECT "deviceId", MAX(ts) AS max_ts
-        FROM readings
-        WHERE ts > NOW() - INTERVAL '1 day'
-        GROUP BY "deviceId"
-      ) latest ON latest."deviceId" = r."deviceId" AND latest.max_ts = r.ts
-    `,
-  ])
+export interface ListDevicesOptions {
+  page?: number
+  limit?: number
+  query?: string
+  status?: string
+  sortField?: "name" | "power" | "yield" | "lastSeen"
+  sortDir?: "asc" | "desc"
+}
 
-  const byStatus = Object.fromEntries(
-    statusCounts.map((s) => [s.status, s._count._all])
-  ) as Record<string, number>
+export async function listDevicesPaginated(options: ListDevicesOptions = {}) {
+  try {
+    const page = Math.max(1, options.page ?? 1)
+    const limit = Math.max(1, Math.min(100, options.limit ?? 20))
+    const skip = (page - 1) * limit
+    const q = options.query?.trim()
+    const statusFilter = options.status && options.status !== "ALL" ? options.status : undefined
 
-  const online = byStatus.ONLINE ?? 0
-  const offline = byStatus.OFFLINE ?? 0
-  const alarm = byStatus.ALARM ?? 0
-  const unknown = byStatus.UNKNOWN ?? 0
+    const where: Record<string, unknown> = {}
+    if (statusFilter) {
+      where.status = statusFilter
+    }
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: "insensitive" } },
+        { sn: { contains: q, mode: "insensitive" } },
+        { plantName: { contains: q, mode: "insensitive" } },
+      ]
+    }
 
-  return {
-    total: online + offline + alarm + unknown,
-    online,
-    offline,
-    alarm,
-    unknown,
-    activeAlarms: alarmCount,
-    totalAcPowerW: aggregate[0]?.total_ac_power ?? 0,
-    totalYieldTodayKwh: aggregate[0]?.total_yield_today ?? 0,
+    const total = await prisma.device.count({ where })
+
+    const devices = await prisma.device.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy:
+        options.sortField === "lastSeen"
+          ? { lastSeenAt: options.sortDir ?? "desc" }
+          : { name: options.sortDir ?? "asc" },
+    })
+
+    const deviceIds = devices.map((d) => d.id)
+    let latestReadingsMap = new Map<string, any>()
+
+    if (deviceIds.length > 0) {
+      try {
+        const latestReadings = await prisma.reading.findMany({
+          where: { deviceId: { in: deviceIds } },
+          orderBy: [{ deviceId: "asc" }, { ts: "desc" }],
+          distinct: ["deviceId"],
+          select: { deviceId: true, acPower: true, yieldToday: true, ts: true },
+        })
+        for (const r of latestReadings) {
+          latestReadingsMap.set(r.deviceId, r)
+        }
+      } catch (err) {
+        console.error("latestReadings fetch error:", err)
+      }
+    }
+
+    const mapped = devices.map((device) => ({
+      id: device.id,
+      sn: device.sn,
+      inverterSn: device.inverterSn,
+      name: device.name,
+      tokenId: device.tokenId,
+      plantName: device.plantName,
+      status: device.status,
+      lastSeenAt: device.lastSeenAt,
+      latestReading: latestReadingsMap.get(device.id) ?? null,
+    }))
+
+    if (options.sortField === "power" || options.sortField === "yield") {
+      const dir = options.sortDir === "asc" ? 1 : -1
+      mapped.sort((a, b) => {
+        const av =
+          options.sortField === "power"
+            ? (a.latestReading?.acPower ?? -1)
+            : (a.latestReading?.yieldToday ?? -1)
+        const bv =
+          options.sortField === "power"
+            ? (b.latestReading?.acPower ?? -1)
+            : (b.latestReading?.yieldToday ?? -1)
+        return (av - bv) * dir
+      })
+    }
+
+    const hasMore = skip + devices.length < total
+
+    return {
+      devices: mapped,
+      total,
+      page,
+      limit,
+      hasMore,
+    }
+  } catch (err) {
+    console.error("listDevicesPaginated error:", err)
+    return {
+      devices: [],
+      total: 0,
+      page: 1,
+      limit: options.limit ?? 20,
+      hasMore: false,
+    }
   }
 }
+
+export const getDashboardStats = unstable_cache(
+  async () => {
+    try {
+      const [statusCounts, alarmCount, aggregate] = await Promise.all([
+        prisma.device.groupBy({ by: ["status"], _count: { _all: true } }),
+        prisma.alarm.count({ where: { resolvedAt: null } }),
+        prisma.$queryRaw<
+          { total_ac_power: number | null; total_yield_today: number | null }[]
+        >`
+          SELECT
+            SUM("acPower") AS total_ac_power,
+            SUM("yieldToday") AS total_yield_today
+          FROM (
+            SELECT DISTINCT ON ("deviceId") "acPower", "yieldToday"
+            FROM readings
+            WHERE ts > NOW() - INTERVAL '48 hours'
+            ORDER BY "deviceId", ts DESC
+          ) latest
+        `,
+      ])
+
+      const byStatus = Object.fromEntries(
+        statusCounts.map((s) => [s.status, s._count._all])
+      ) as Record<string, number>
+
+      const online = byStatus.ONLINE ?? 0
+      const offline = byStatus.OFFLINE ?? 0
+      const alarm = byStatus.ALARM ?? 0
+      const unknown = byStatus.UNKNOWN ?? 0
+
+      return {
+        total: online + offline + alarm + unknown,
+        online,
+        offline,
+        alarm,
+        unknown,
+        activeAlarms: alarmCount,
+        totalAcPowerW: aggregate[0]?.total_ac_power ?? 0,
+        totalYieldTodayKwh: aggregate[0]?.total_yield_today ?? 0,
+      }
+    } catch (err) {
+      console.error("getDashboardStats error:", err)
+      return {
+        total: 0,
+        online: 0,
+        offline: 0,
+        alarm: 0,
+        unknown: 0,
+        activeAlarms: 0,
+        totalAcPowerW: 0,
+        totalYieldTodayKwh: 0,
+      }
+    }
+  },
+  ["dashboard-stats"],
+  { revalidate: 10 }
+)
 
 // Start of "today" in Uzbekistan (UTC+5) — inverters reset yieldToday at
 // their local midnight, so day-scoped aggregates must use this boundary.
@@ -79,48 +205,65 @@ function uzDayStart(): Date {
 
 /**
  * Fleet-wide AC power over the last `hours`, in 30-minute buckets.
- * Averages each device within a bucket first, then sums across devices —
- * so a device that happened to be polled twice in one bucket doesn't count
- * double in the fleet total.
  */
-export async function getFleetPowerCurve(hours = 24) {
-  const rows = await prisma.$queryRaw<{ bucket: Date; total_w: number }[]>`
-    SELECT bucket, SUM(avg_w)::float AS total_w
-    FROM (
-      SELECT
-        to_timestamp(floor(extract(epoch FROM ts) / 1800) * 1800) AS bucket,
-        "deviceId",
-        AVG("acPower") AS avg_w
-      FROM readings
-      WHERE ts > NOW() - make_interval(hours => ${hours}::int)
-        AND "acPower" IS NOT NULL
-      GROUP BY 1, 2
-    ) per_device
-    GROUP BY bucket
-    ORDER BY bucket
-  `
+export const getFleetPowerCurve = unstable_cache(
+  async (hours = 24) => {
+    try {
+      const rows = await prisma.$queryRaw<{ bucket: Date; total_w: number }[]>`
+        SELECT bucket, SUM(avg_w)::float AS total_w
+        FROM (
+          SELECT
+            to_timestamp(floor(extract(epoch FROM ts) / 1800) * 1800) AS bucket,
+            "deviceId",
+            AVG("acPower") AS avg_w
+          FROM readings
+          WHERE ts > NOW() - make_interval(hours => ${hours}::int)
+            AND "acPower" IS NOT NULL
+          GROUP BY 1, 2
+        ) per_device
+        GROUP BY bucket
+        ORDER BY bucket
+      `
 
-  return rows.map((r) => ({ ts: r.bucket.toISOString(), totalW: r.total_w }))
-}
+      return rows.map((r) => ({ ts: r.bucket.toISOString(), totalW: r.total_w }))
+    } catch (err) {
+      console.error("getFleetPowerCurve error:", err)
+      return []
+    }
+  },
+  ["fleet-power-curve"],
+  { revalidate: 15 }
+)
 
 /** Today's most productive devices (by max yieldToday since UZ midnight). */
-export async function getTopProducersToday(limit = 5) {
-  const dayStart = uzDayStart()
-  return prisma.$queryRaw<
-    { name: string; sn: string; yield_kwh: number | null; peak_w: number | null }[]
-  >`
-    SELECT d.name, d.sn,
-           MAX(r."yieldToday")::float AS yield_kwh,
-           MAX(r."acPower")::float AS peak_w
-    FROM readings r
-    JOIN devices d ON d.id = r."deviceId"
-    WHERE r.ts >= ${dayStart}
-    GROUP BY d.id, d.name, d.sn
-    HAVING MAX(r."yieldToday") IS NOT NULL
-    ORDER BY yield_kwh DESC NULLS LAST
-    LIMIT ${limit}
-  `
-}
+export const getTopProducersToday = unstable_cache(
+  async (limit = 5) => {
+    try {
+      const dayStart = uzDayStart()
+      return await prisma.$queryRaw<
+        { name: string; sn: string; yield_kwh: number | null; peak_w: number | null }[]
+      >`
+        SELECT d.name, d.sn,
+               r."yieldToday"::float AS yield_kwh,
+               r."acPower"::float AS peak_w
+        FROM (
+          SELECT DISTINCT ON ("deviceId") "deviceId", "yieldToday", "acPower"
+          FROM readings
+          WHERE ts >= ${dayStart} AND "yieldToday" IS NOT NULL
+          ORDER BY "deviceId", "yieldToday" DESC
+        ) r
+        JOIN devices d ON d.id = r."deviceId"
+        ORDER BY yield_kwh DESC
+        LIMIT ${limit}
+      `
+    } catch (err) {
+      console.error("getTopProducersToday error:", err)
+      return []
+    }
+  },
+  ["top-producers-today"],
+  { revalidate: 15 }
+)
 
 export async function createDevice(input: DeviceCreateInput) {
   return prisma.device.create({
