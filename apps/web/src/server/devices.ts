@@ -456,6 +456,22 @@ export async function listGroupedAlarms() {
   )
 }
 
+export async function resolveAlarmById(id: string) {
+  const alarm = await prisma.alarm.findUnique({ where: { id }, select: { deviceId: true } })
+  if (!alarm) return 0
+  await prisma.$transaction([
+    prisma.alarm.update({
+      where: { id },
+      data: { resolvedAt: new Date() },
+    }),
+    prisma.device.updateMany({
+      where: { id: alarm.deviceId, status: "ALARM" },
+      data: { status: "UNKNOWN" },
+    }),
+  ])
+  return 1
+}
+
 // Resolving an alarm acknowledges the issue; the device is no longer in a
 // known-bad state, but we also have no fresh reading — so reset any ALARM
 // devices to UNKNOWN until the next poll determines their real status.
