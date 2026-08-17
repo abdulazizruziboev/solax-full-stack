@@ -7,21 +7,12 @@ import {
   listAlarms,
   listDevicesPaginated,
 } from "@/server/devices"
-import dynamicImport from "next/dynamic"
+import { FleetPowerChart } from "./fleet-power-chart"
 import { StatCard } from "./stat-card"
 import { StatusBreakdown } from "./status-breakdown"
 import { TopProducers } from "./top-producers"
 import { RecentAlarms } from "./recent-alarms"
 import { DeviceStatusBadge } from "@/components/status-indicator"
-import { Skeleton } from "@/components/ui/skeleton"
-
-const FleetPowerChart = dynamicImport(
-  () => import("./fleet-power-chart").then((mod) => mod.FleetPowerChart),
-  {
-    ssr: false,
-    loading: () => <Skeleton className="h-[260px] w-full rounded-md" />,
-  }
-)
 
 export const dynamic = "force-dynamic"
 

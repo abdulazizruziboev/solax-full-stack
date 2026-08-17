@@ -1,14 +1,8 @@
-import dynamicImport from "next/dynamic"
 import { listDevicesPaginated } from "@/server/devices"
 import { AddDeviceDialog } from "./add-device-dialog"
 import { DevicesTable } from "./devices-table"
 import { RefreshDevicesButton } from "./refresh-devices-button"
-import type { DevicePdfRow } from "./devices-pdf-button"
-
-const DevicesPdfButton = dynamicImport(
-  () => import("./devices-pdf-button").then((mod) => mod.DevicesPdfButton),
-  { ssr: false }
-)
+import { DevicesPdfButton, type DevicePdfRow } from "./devices-pdf-button"
 
 export const dynamic = "force-dynamic"
 
