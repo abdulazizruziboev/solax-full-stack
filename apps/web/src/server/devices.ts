@@ -432,7 +432,7 @@ export async function listGroupedAlarms() {
     const existing = groups.get(key)
     if (existing) {
       existing.count += 1
-      if (existing.sampleDevices.length < 4) {
+      if (!existing.sampleDevices.some((d) => d.sn === a.device.sn)) {
         existing.sampleDevices.push({ name: a.device.name, sn: a.device.sn })
       }
       if (a.ts > existing.latestTs) existing.latestTs = a.ts

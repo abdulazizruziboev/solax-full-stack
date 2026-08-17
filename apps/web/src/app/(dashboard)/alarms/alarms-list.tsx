@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Check, ChevronDown } from "lucide-react"
@@ -30,6 +31,11 @@ export function AlarmsList({ groups }: { groups: AlarmGroup[] }) {
   const router = useRouter()
   const [pending, setPending] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [showAllMap, setShowAllMap] = useState<Record<string, boolean>>({})
+
+  function toggleShowAll(code: string) {
+    setShowAllMap((prev) => ({ ...prev, [code]: !prev[code] }))
+  }
 
   async function resolve(code?: string) {
     setPending(code ?? "__all__")
@@ -73,6 +79,12 @@ export function AlarmsList({ groups }: { groups: AlarmGroup[] }) {
       <div className="flex flex-col gap-3">
         {groups.map((group) => {
           const isOpen = expanded === group.code
+          const isShowAll = !!showAllMap[group.code]
+          const visibleDevices = isShowAll
+            ? group.sampleDevices
+            : group.sampleDevices.slice(0, 4)
+          const remainingCount = group.sampleDevices.length - 4
+
           return (
             <div
               key={group.code}
@@ -107,19 +119,25 @@ export function AlarmsList({ groups }: { groups: AlarmGroup[] }) {
                   </button>
 
                   {isOpen && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {group.sampleDevices.map((d) => (
-                        <span
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {visibleDevices.map((d) => (
+                        <Link
                           key={d.sn}
-                          className="rounded-md bg-muted px-2 py-0.5 text-xs"
+                          href={`/devices/${encodeURIComponent(d.sn)}`}
+                          className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground transition-colors hover:bg-neutral-200 dark:hover:bg-neutral-800"
                         >
                           {d.name}
-                        </span>
+                        </Link>
                       ))}
-                      {group.count > group.sampleDevices.length && (
-                        <span className="rounded-md px-2 py-0.5 text-xs text-muted-foreground">
-                          +{group.count - group.sampleDevices.length} ta
-                        </span>
+
+                      {group.sampleDevices.length > 4 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleShowAll(group.code)}
+                          className="rounded-md bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                        >
+                          {isShowAll ? "Yashirish" : `+${remainingCount} ta (Barchasini ko'rsat)`}
+                        </button>
                       )}
                     </div>
                   )}
