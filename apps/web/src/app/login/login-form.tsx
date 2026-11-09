@@ -79,12 +79,12 @@ export function LoginForm({ pinLength = 6 }: { pinLength?: number }) {
           />
         </div>
         <div>
-          <h1 className="text-sm font-semibold tracking-tight">Solar Pro Monitoring</h1>
-          <p className="text-muted-foreground text-sm mt-1">PIN kodni kiriting</p>
+          <h1 className="text-base font-semibold tracking-tight">Solar Pro Monitoring</h1>
+          <p className="text-muted-foreground text-xs mt-0.5">PIN kodni kiriting</p>
         </div>
       </div>
 
-      <div className="w-full flex flex-col items-center gap-2">
+      <div className="w-full flex flex-col items-center">
         {/* Hidden input for physical keyboard typing */}
         <input
           ref={inputRef}
@@ -128,21 +128,19 @@ export function LoginForm({ pinLength = 6 }: { pinLength?: number }) {
           })}
         </div>
 
-        {/* Status / Error message / Loading indicator */}
-        {(isPending || errorMsg) ? (
-          <div className="py-0.5 text-center">
-            {isPending ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground animate-in fade-in">
-                <Loader2 className="size-4 animate-spin" />
-                <span>Tekshirilmoqda...</span>
-              </div>
-            ) : errorMsg ? (
-              <div className="text-sm font-medium text-destructive animate-in fade-in">
-                {errorMsg}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        {/* Fixed-height Status / Error message / Loading indicator to prevent layout jumping */}
+        <div className="h-6 flex items-center justify-center text-center my-1">
+          {isPending ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground animate-in fade-in">
+              <Loader2 className="size-3.5 animate-spin" />
+              <span>Tekshirilmoqda...</span>
+            </div>
+          ) : errorMsg ? (
+            <div className="text-xs font-medium text-destructive animate-in fade-in">
+              {errorMsg}
+            </div>
+          ) : null}
+        </div>
 
         {/* Numeric Keypad */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
