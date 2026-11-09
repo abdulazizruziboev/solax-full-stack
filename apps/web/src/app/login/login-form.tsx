@@ -1,80 +1,72 @@
-"use client";
+"use client"
 
-import { useActionState, useEffect, useRef, useState } from "react";
-import Image from "next/image";
-import { Delete, Loader2 } from "lucide-react";
-import { loginAction, type LoginActionState } from "./actions";
-
-const initialState: LoginActionState = {};
+import { useEffect, useRef, useState, useTransition } from "react"
+import Image from "next/image"
+import { Delete, Loader2 } from "lucide-react"
+import { loginAction } from "./actions"
 
 export function LoginForm({ pinLength = 6 }: { pinLength?: number }) {
-  const [state, formAction, pending] = useActionState(
-    loginAction,
-    initialState,
-  );
-  const [pin, setPin] = useState("");
-  const [shake, setShake] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const submittedPinRef = useRef<string>("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
+  const [pin, setPin] = useState("")
+  const [shake, setShake] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Focus input automatically so keyboard typing works right away
+  // Focus input on mount so physical keyboard typing works right away
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    inputRef.current?.focus()
+  }, [])
 
-  // Auto-submit when PIN reaches required length (and hasn't already been submitted)
-  useEffect(() => {
-    if (
-      pin.length === pinLength &&
-      !pending &&
-      submittedPinRef.current !== pin
-    ) {
-      submittedPinRef.current = pin;
-      formRef.current?.requestSubmit();
-    }
-  }, [pin, pinLength, pending]);
+  function submitPin(code: string) {
+    if (isPending) return
+    setErrorMsg(null)
 
-  // When server action returns an error
-  useEffect(() => {
-    if (state.error) {
-      setErrorMsg(state.error);
-      setShake(true);
-      setPin(""); // Clear immediately so it cannot re-trigger auto-submit loop
-      const timer = setTimeout(() => {
-        setShake(false);
-        submittedPinRef.current = "";
-        inputRef.current?.focus();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [state.error]);
+    startTransition(async () => {
+      const formData = new FormData()
+      formData.append("pin", code)
+      const res = await loginAction({}, formData)
+
+      if (res?.error) {
+        setShake(true)
+        setErrorMsg(res.error)
+        setPin("") // Clear dots immediately on wrong PIN
+        setTimeout(() => {
+          setShake(false)
+          inputRef.current?.focus()
+        }, 500)
+      }
+    })
+  }
 
   function handleDigit(digit: string) {
-    if (pending) return;
-    setErrorMsg(null);
-    setPin((prev) => (prev.length < pinLength ? prev + digit : prev));
+    if (isPending) return
+    setErrorMsg(null)
+    const next = pin + digit
+    if (next.length > pinLength) return
+    setPin(next)
+
+    if (next.length === pinLength) {
+      submitPin(next)
+    }
   }
 
   function handleBackspace() {
-    if (pending) return;
-    setErrorMsg(null);
-    setPin((prev) => prev.slice(0, -1));
+    if (isPending) return
+    setErrorMsg(null)
+    setPin((prev) => prev.slice(0, -1))
   }
 
   function handleClear() {
-    if (pending) return;
-    setErrorMsg(null);
-    setPin("");
-    submittedPinRef.current = "";
-    inputRef.current?.focus();
+    if (isPending) return
+    setErrorMsg(null)
+    setPin("")
+    inputRef.current?.focus()
   }
 
   return (
-    <div className="w-full max-w-sm flex flex-col items-center">
+    <div className="w-full max-w-sm flex flex-col items-center justify-center">
       {/* Brand Header */}
-      <div className="mb-6 flex flex-col items-center gap-3 text-center">
+      <div className="mb-3 flex flex-col items-center gap-3 text-center">
         <div className="flex size-20 items-center justify-center rounded-2xl bg-white p-2 shadow-sm border border-border/40 overflow-hidden">
           <Image
             src="/logo.png"
@@ -87,31 +79,26 @@ export function LoginForm({ pinLength = 6 }: { pinLength?: number }) {
           />
         </div>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">
-            SolarPro Monitoring
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            PIN kodni kiriting
-          </p>
+          <h1 className="text-sm font-semibold tracking-tight">Solar Pro Monitoring</h1>
+          <p className="text-muted-foreground text-sm mt-1">PIN kodni kiriting</p>
         </div>
       </div>
 
-      <form
-        ref={formRef}
-        action={formAction}
-        className="w-full flex flex-col items-center"
-      >
-        {/* Hidden / Transparent actual input for keyboard typing & form submission */}
+      <div className="w-full flex flex-col items-center gap-2">
+        {/* Hidden input for physical keyboard typing */}
         <input
           ref={inputRef}
           type="password"
-          name="pin"
           value={pin}
+          disabled={isPending}
           onChange={(e) => {
-            if (pending) return;
-            setErrorMsg(null);
-            const val = e.target.value.replace(/\D/g, "").slice(0, pinLength);
-            setPin(val);
+            if (isPending) return
+            setErrorMsg(null)
+            const val = e.target.value.replace(/\D/g, "").slice(0, pinLength)
+            setPin(val)
+            if (val.length === pinLength) {
+              submitPin(val)
+            }
           }}
           inputMode="numeric"
           autoComplete="one-time-code"
@@ -122,12 +109,12 @@ export function LoginForm({ pinLength = 6 }: { pinLength?: number }) {
         {/* Visual PIN Dots Indicator */}
         <div
           onClick={() => inputRef.current?.focus()}
-          className={`cursor-pointer flex flex-wrap max-w-[280px] items-center justify-center gap-2.5 py-2 px-4 rounded-xl hover:bg-muted/40 transition-all ${
+          className={`cursor-pointer flex flex-wrap max-w-[280px] items-center justify-center gap-2.5 py-1 px-4 rounded-xl hover:bg-muted/40 transition-all ${
             shake ? "animate-shake text-destructive" : ""
           }`}
         >
           {Array.from({ length: pinLength }).map((_, idx) => {
-            const isFilled = idx < pin.length;
+            const isFilled = idx < pin.length
             return (
               <div
                 key={idx}
@@ -137,69 +124,74 @@ export function LoginForm({ pinLength = 6 }: { pinLength?: number }) {
                     : "size-3 bg-muted-foreground/30 border border-muted-foreground/40"
                 } ${shake ? "bg-destructive border-destructive" : ""}`}
               />
-            );
+            )
           })}
         </div>
 
         {/* Status / Error message / Loading indicator */}
-        <div className="h-6 mb-4 flex items-center justify-center text-center">
-          {pending ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground animate-in fade-in">
-              <Loader2 className="size-4 animate-spin" />
-              <span>Tekshirilmoqda...</span>
-            </div>
-          ) : errorMsg ? (
-            <div className="text-sm font-medium text-destructive animate-in fade-in">
-              {errorMsg}
-            </div>
-          ) : null}
-        </div>
+        {(isPending || errorMsg) ? (
+          <div className="py-0.5 text-center">
+            {isPending ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground animate-in fade-in">
+                <Loader2 className="size-4 animate-spin" />
+                <span>Tekshirilmoqda...</span>
+              </div>
+            ) : errorMsg ? (
+              <div className="text-sm font-medium text-destructive animate-in fade-in">
+                {errorMsg}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Numeric Keypad */}
-        <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-2">
-          {["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "del"].map(
-            (key) => {
-              if (key === "C") {
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={handleClear}
-                    disabled={pending || pin.length === 0}
-                    className="flex size-14 sm:size-16 items-center justify-center rounded-2xl border border-border/40 bg-card text-sm font-medium text-muted-foreground transition-all hover:bg-muted active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    C
-                  </button>
-                );
-              }
-              if (key === "del") {
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={handleBackspace}
-                    disabled={pending || pin.length === 0}
-                    className="flex size-14 sm:size-16 items-center justify-center rounded-2xl border border-border/40 bg-card text-muted-foreground transition-all hover:bg-muted active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <Delete className="size-5" />
-                  </button>
-                );
-              }
+        <div className="grid grid-cols-3 gap-3 sm:gap-4">
+          {[
+            "1", "2", "3",
+            "4", "5", "6",
+            "7", "8", "9",
+            "C", "0", "del"
+          ].map((key) => {
+            if (key === "C") {
               return (
                 <button
                   key={key}
                   type="button"
-                  onClick={() => handleDigit(key)}
-                  disabled={pending || pin.length >= pinLength}
-                  className="flex size-14 sm:size-16 items-center justify-center rounded-2xl border border-border/40 bg-card text-xl font-medium tracking-tight shadow-2xs transition-all hover:bg-muted active:scale-95 disabled:opacity-50 cursor-pointer"
+                  onClick={handleClear}
+                  disabled={isPending || pin.length === 0}
+                  className="flex size-14 sm:size-16 items-center justify-center rounded-2xl border border-border/40 bg-card text-sm font-medium text-muted-foreground transition-all hover:bg-muted active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {key}
+                  C
                 </button>
-              );
-            },
-          )}
+              )
+            }
+            if (key === "del") {
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={handleBackspace}
+                  disabled={isPending || pin.length === 0}
+                  className="flex size-14 sm:size-16 items-center justify-center rounded-2xl border border-border/40 bg-card text-muted-foreground transition-all hover:bg-muted active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Delete className="size-5" />
+                </button>
+              )
+            }
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handleDigit(key)}
+                disabled={isPending || pin.length >= pinLength}
+                className="flex size-14 sm:size-16 items-center justify-center rounded-2xl border border-border/40 bg-card text-xl font-medium tracking-tight shadow-2xs transition-all hover:bg-muted active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {key}
+              </button>
+            )
+          })}
         </div>
-      </form>
+      </div>
     </div>
-  );
+  )
 }
