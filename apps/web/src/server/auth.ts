@@ -4,8 +4,17 @@ import bcrypt from "bcryptjs"
 import { prisma } from "@solax/db"
 import { loginSchema } from "@solax/shared"
 
+// 3 kunlik sessiya muddati (3 kun * 24 soat * 60 daqiqa * 60 soniya = 259,200s)
+const SESSION_MAX_AGE = 3 * 24 * 60 * 60
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  session: { strategy: "jwt" },
+  session: {
+    strategy: "jwt",
+    maxAge: SESSION_MAX_AGE,
+  },
+  jwt: {
+    maxAge: SESSION_MAX_AGE,
+  },
   pages: { signIn: "/login" },
   // The app runs behind a reverse proxy (Caddy) in production, so Auth.js must
   // trust the forwarded host instead of rejecting it as UntrustedHost.
@@ -61,8 +70,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     jwt: async ({ token, user }) => {
+      const now = Math.floor(Date.now() / 1000)
       if (user) {
         token.role = (user as { role?: string }).role
+        token.authTime = now
+      }
+      // Sessiya 3 kundan oshgan bo'lsa token eskiradi va tizimdan chiqaradi
+      if (typeof token.authTime === "number" && now - token.authTime > SESSION_MAX_AGE) {
+        return null
       }
       return token
     },

@@ -12,19 +12,21 @@ export function ThemeToggle({ className }: { className?: string }) {
   useEffect(() => setMounted(true), [])
 
   const isDark = theme === "dark"
+  const label = mounted && isDark ? "Yorug' rejim" : "Tungi rejim"
 
   return (
     <button
       type="button"
       aria-label="Mavzuni almashtirish"
+      title={label}
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className={cn(
         "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
         className
       )}
     >
-      {mounted && isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-      <span>{mounted && isDark ? "Yorug' rejim" : "Tungi rejim"}</span>
+      {mounted && isDark ? <Sun className="size-4 shrink-0" /> : <Moon className="size-4 shrink-0" />}
+      <span className="truncate group-data-[collapsible=icon]:hidden">{label}</span>
     </button>
   )
 }

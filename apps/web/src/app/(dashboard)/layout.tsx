@@ -1,3 +1,4 @@
+import { cookies } from "next/headers"
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { auth } from "@/server/auth"
 import { countActiveAlarms } from "@/server/devices"
@@ -8,10 +9,16 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const [session, alarmCount] = await Promise.all([auth(), countActiveAlarms()])
+  const [session, alarmCount, cookieStore] = await Promise.all([
+    auth(),
+    countActiveAlarms(),
+    cookies(),
+  ])
+
+  const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar user={session?.user} alarmCount={alarmCount} />
       <main className="flex min-w-0 flex-1 flex-col bg-background">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-border/60 bg-background/80 px-4 backdrop-blur-sm md:hidden">
