@@ -49,19 +49,19 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-border/60 p-3 group-data-[collapsible=icon]:p-2 transition-all">
-        <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
+      <SidebarHeader className="border-b border-border/60 p-3 group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:px-0 transition-all">
+        <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center w-full">
           <Link
             href="/"
-            className="flex items-center gap-2.5 overflow-hidden transition-opacity hover:opacity-85"
+            className="flex items-center gap-2.5 transition-opacity hover:opacity-85 group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:justify-center"
             title="Solar Pro Monitoring"
           >
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white p-1 shadow-xs border border-border/40 overflow-hidden">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white p-1 shadow-xs border border-border/40">
               <Image
                 src="/logo.png"
                 alt="Solar Pro"
-                width={36}
-                height={36}
+                width={32}
+                height={32}
                 unoptimized
                 className="size-full object-contain"
               />
