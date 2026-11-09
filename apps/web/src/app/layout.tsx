@@ -19,8 +19,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Solax Monitoring",
-  description: "175+ Solax inverter qurilmalarini bir joyda boshqarish va analiz qilish platformasi",
+  title: "Solar Pro Monitoring",
+  description: "Solar Pro quyosh stansiyalari monitoringi va diagnostikasi platformasi",
 };
 
 export default function RootLayout({

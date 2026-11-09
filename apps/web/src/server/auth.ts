@@ -13,10 +13,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Credentials({
       credentials: {
+        pin: { label: "PIN", type: "password" },
         email: { label: "Email", type: "email" },
         password: { label: "Parol", type: "password" },
       },
       authorize: async (credentials) => {
+        const pin = typeof credentials?.pin === "string" ? credentials.pin.trim() : ""
+        if (pin) {
+          const configuredPin = process.env.ADMIN_PIN?.trim() || "051107"
+          if (pin !== configuredPin) {
+            return null
+          }
+
+          const adminUser = await prisma.user.findFirst({
+            where: { role: "ADMIN" },
+            orderBy: { createdAt: "asc" },
+          })
+          if (!adminUser) return null
+
+          return {
+            id: adminUser.id,
+            email: adminUser.email,
+            name: adminUser.name ?? "Admin",
+            role: adminUser.role,
+          }
+        }
+
         const parsed = loginSchema.safeParse(credentials)
         if (!parsed.success) return null
 

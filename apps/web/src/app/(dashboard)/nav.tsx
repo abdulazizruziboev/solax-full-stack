@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
@@ -45,12 +46,19 @@ export function AppSidebar({
     <Sidebar>
       <SidebarHeader className="border-b border-border/60 px-4 py-4">
         <div className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-md bg-foreground text-background">
-            <Sun className="size-4.5" />
+          <div className="flex size-9 items-center justify-center rounded-lg bg-white p-1 shadow-xs border border-border/40 overflow-hidden">
+            <Image
+              src="/logo.png"
+              alt="Solar Pro"
+              width={36}
+              height={36}
+              unoptimized
+              className="size-full object-contain"
+            />
           </div>
           <div className="leading-tight">
-            <p className="text-sm font-semibold tracking-tight">Solax Monitoring</p>
-            <p className="text-muted-foreground text-[11px]">Quyosh energiyasi nazorati</p>
+            <p className="text-sm font-semibold tracking-tight">Solar Pro</p>
+            <p className="text-muted-foreground text-[11px]">Quyosh energiyasi monitoringi</p>
           </div>
         </div>
       </SidebarHeader>

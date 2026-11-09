@@ -16,7 +16,7 @@ export default async function DashboardLayout({
       <main className="flex min-w-0 flex-1 flex-col bg-background">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-border/60 bg-background/80 px-4 backdrop-blur-sm md:hidden">
           <SidebarTrigger />
-          <span className="text-sm font-semibold">Solax Monitoring</span>
+          <span className="text-sm font-semibold">Solar Pro Monitoring</span>
         </header>
         <div className="mx-auto w-full max-w-7xl flex-1 overflow-x-clip px-4 py-6 md:px-8 md:py-8">
           {children}
