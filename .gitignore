@@ -6,3 +6,10 @@ dist/
 *.log
 .turbo/
 .DS_Store
+
+# Private keys / credentials — never commit
+id_*
+!id_*.pub.example
+*.pem
+*.key
+backups/

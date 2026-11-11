@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/server/auth"
+import { guard } from "@/server/guard"
 import { getDeviceReadings } from "@/server/devices"
 
 export async function GET(
   _request: Request,
   ctx: RouteContext<"/api/devices/[sn]/readings">
 ) {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const denied = await guard()
+  if (denied) return denied
 
   const { sn } = await ctx.params
   const data = await getDeviceReadings(decodeURIComponent(sn))

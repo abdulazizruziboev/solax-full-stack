@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/server/auth"
+import { guard, readJson } from "@/server/guard"
 import { resolveAlarmById, resolveAlarmsByCode, resolveAllAlarms } from "@/server/devices"
 
 export async function POST(request: Request) {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const denied = await guard({ admin: true })
+  if (denied) return denied
 
-  const body = await request.json().catch(() => ({}))
-  const code: unknown = body?.code
-  const alarmId: unknown = body?.alarmId
+  const body = (await readJson(request)) as { code?: unknown; alarmId?: unknown } | null
+  const code = body?.code
+  const alarmId = body?.alarmId
 
   let resolved = 0
   if (typeof alarmId === "string" && alarmId.length > 0) {

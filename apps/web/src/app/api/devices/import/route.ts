@@ -1,20 +1,34 @@
 import { NextResponse } from "next/server"
 import * as XLSX from "xlsx"
-import { auth } from "@/server/auth"
+import { guard } from "@/server/guard"
 import { importDevices } from "@/server/devices"
 import { deviceImportRowSchema } from "@solax/shared"
 
-export async function POST(request: Request) {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+// A device list is a few hundred rows; anything bigger is a mistake or abuse
+// (the xlsx parser is also the riskiest dependency here — keep its input small).
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024
+const MAX_IMPORT_ROWS = 5000
 
-  const formData = await request.formData()
+export async function POST(request: Request) {
+  const denied = await guard({ admin: true })
+  if (denied) return denied
+
+  let formData: FormData
+  try {
+    formData = await request.formData()
+  } catch {
+    return NextResponse.json({ error: "Fayl topilmadi" }, { status: 400 })
+  }
   const file = formData.get("file")
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Fayl topilmadi" }, { status: 400 })
+  }
+  if (file.size > MAX_IMPORT_BYTES) {
+    return NextResponse.json(
+      { error: `Fayl juda katta (maksimum ${MAX_IMPORT_BYTES / 1024 / 1024} MB)` },
+      { status: 413 }
+    )
   }
 
   const buffer = Buffer.from(await file.arrayBuffer())
@@ -23,9 +37,10 @@ export async function POST(request: Request) {
   try {
     workbook = XLSX.read(buffer, { type: "buffer" })
   } catch (err) {
+    console.error("import: XLSX.read failed:", err)
     return NextResponse.json(
       {
-        error: `Fayl o'qib bo'lmadi. .xlsx, .xls yoki .csv formatida ekanligiga ishonch hosil qiling. (${err instanceof Error ? err.message : String(err)})`,
+        error: "Fayl o'qib bo'lmadi. .xlsx, .xls yoki .csv formatida ekanligiga ishonch hosil qiling.",
       },
       { status: 400 }
     )
@@ -40,6 +55,13 @@ export async function POST(request: Request) {
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: "",
   })
+
+  if (rawRows.length > MAX_IMPORT_ROWS) {
+    return NextResponse.json(
+      { error: `Qatorlar soni juda ko'p (maksimum ${MAX_IMPORT_ROWS})` },
+      { status: 400 }
+    )
+  }
 
   const rows: {
     sn: string

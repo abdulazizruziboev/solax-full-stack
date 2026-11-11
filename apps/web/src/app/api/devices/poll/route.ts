@@ -1,29 +1,33 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/server/auth"
+import { guard, readJson } from "@/server/guard"
 import { enqueueDevicePolls } from "@/server/poll-queue"
+
+const MAX_IDS = 500
 
 // POST /api/devices/poll
 // Body (optional): { deviceIds: string[] } — poll specific devices.
 // No body / empty ids → poll every device now.
 export async function POST(request: Request) {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const denied = await guard()
+  if (denied) return denied
 
   let deviceIds: string[] | undefined
-  try {
-    const body = await request.json()
-    if (Array.isArray(body?.deviceIds)) deviceIds = body.deviceIds
-  } catch {
-    // no body — poll all
+  const body = (await readJson(request)) as { deviceIds?: unknown } | null
+  if (Array.isArray(body?.deviceIds)) {
+    if (
+      body.deviceIds.length > MAX_IDS ||
+      !body.deviceIds.every((id): id is string => typeof id === "string")
+    ) {
+      return NextResponse.json({ error: "deviceIds noto'g'ri" }, { status: 400 })
+    }
+    deviceIds = body.deviceIds
   }
 
   try {
     const count = await enqueueDevicePolls(deviceIds)
     return NextResponse.json({ queued: count })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error("POST /api/devices/poll failed:", err)
+    return NextResponse.json({ error: "Navbatga qo'shib bo'lmadi" }, { status: 500 })
   }
 }

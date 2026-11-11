@@ -1,11 +1,19 @@
 import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
+import { createHash, timingSafeEqual } from "node:crypto"
 import { prisma } from "@solax/db"
 import { loginSchema } from "@solax/shared"
 
 // 3 kunlik sessiya muddati (3 kun * 24 soat * 60 daqiqa * 60 soniya = 259,200s)
 const SESSION_MAX_AGE = 3 * 24 * 60 * 60
+
+// Constant-time PIN comparison (hash both sides so lengths always match).
+function pinMatches(input: string, expected: string): boolean {
+  const a = createHash("sha256").update(input).digest()
+  const b = createHash("sha256").update(expected).digest()
+  return timingSafeEqual(a, b)
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: {
@@ -29,8 +37,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       authorize: async (credentials) => {
         const pin = typeof credentials?.pin === "string" ? credentials.pin.trim() : ""
         if (pin) {
-          const configuredPin = process.env.ADMIN_PIN?.trim() || "258025"
-          if (pin !== configuredPin && pin !== "258025") {
+          // PIN login is only enabled when ADMIN_PIN is explicitly configured —
+          // there is deliberately no built-in fallback PIN.
+          const configuredPin = process.env.ADMIN_PIN?.trim()
+          if (!configuredPin || !pinMatches(pin, configuredPin)) {
             return null
           }
 
