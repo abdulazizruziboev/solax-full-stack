@@ -1,9 +1,12 @@
 name: Deploy
 
-# Deploys on every push to main. Assumes CI (ci.yml) is the quality gate; this
-# job builds the images on the VPS and restarts the stack. One at a time.
+# Deploys main only after the CI workflow has passed on it (lint, typecheck,
+# tests, build). This job builds the images on the VPS and restarts the stack.
+# One at a time.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
 
 concurrency:
@@ -12,6 +15,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
