@@ -23,9 +23,12 @@ const globalForQueue = globalThis as unknown as { pollQueue?: Queue }
 function getPollQueue(): Queue {
   if (!globalForQueue.pollQueue) {
     const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379"
-    globalForQueue.pollQueue = new Queue(POLL_QUEUE_NAME, {
+    const queue = new Queue(POLL_QUEUE_NAME, {
       connection: parseRedisUrl(redisUrl),
     })
+    // Without a listener a Redis hiccup surfaces as an unhandled 'error' event.
+    queue.on("error", (err) => console.error("[poll-queue] redis error:", err.message))
+    globalForQueue.pollQueue = queue
   }
   return globalForQueue.pollQueue
 }
@@ -45,8 +48,22 @@ export async function enqueueDevicePolls(deviceIds?: string[]): Promise<number> 
   if (devices.length === 0) return 0
 
   const queue = getPollQueue()
+
+  // Skip devices that already have an on-demand (priority 1) poll waiting, so
+  // repeated clicks / the 30s live-mode timer can't stack duplicates and eat the
+  // worker's rate-limit budget. Scheduled low-priority jobs don't count: an
+  // on-demand poll should still jump ahead of those.
+  const waiting = await queue.getJobs(["waiting", "prioritized", "delayed"])
+  const alreadyQueued = new Set(
+    waiting
+      .filter((j) => j.opts.priority === 1)
+      .map((j) => (j.data as { deviceId: string }).deviceId)
+  )
+  const toQueue = devices.filter((d) => !alreadyQueued.has(d.id))
+  if (toQueue.length === 0) return 0
+
   await queue.addBulk(
-    devices.map((device) => ({
+    toQueue.map((device) => ({
       name: "poll-device",
       data: { deviceId: device.id, sn: device.sn, tokenId: device.tokenId },
       opts: {
@@ -62,5 +79,5 @@ export async function enqueueDevicePolls(deviceIds?: string[]): Promise<number> 
     }))
   )
 
-  return devices.length
+  return toQueue.length
 }

@@ -37,7 +37,6 @@ const links = [
 ]
 
 export function AppSidebar({
-  user,
   alarmCount = 0,
 }: {
   user?: { name?: string | null; email?: string | null }
@@ -146,7 +145,7 @@ export function AppSidebar({
           ) : (
             <>
               <ChevronLeft className="size-4 shrink-0" />
-              <span className="text-xs">Yig'ish</span>
+              <span className="text-xs">Yig&apos;ish</span>
             </>
           )}
         </button>

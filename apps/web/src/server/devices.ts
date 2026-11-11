@@ -1,6 +1,6 @@
 import "server-only"
 import { unstable_cache } from "next/cache"
-import { prisma } from "@solax/db"
+import { prisma, type Prisma } from "@solax/db"
 import type { DeviceCreateInput, DeviceImportRow } from "@solax/shared"
 
 export async function listDevicesWithLatestReading() {
@@ -36,162 +36,136 @@ export interface ListDevicesOptions {
   sortDir?: "asc" | "desc"
 }
 
-export async function listDevicesPaginated(options: ListDevicesOptions = {}) {
-  try {
-    const page = Math.max(1, options.page ?? 1)
-    const limit = Math.max(1, Math.min(100, options.limit ?? 20))
-    const skip = (page - 1) * limit
-    const q = options.query?.trim()
-    const statusFilter = options.status && options.status !== "ALL" ? options.status : undefined
+export interface LatestReading {
+  acPower: number | null
+  yieldToday: number | null
+  ts: Date
+}
 
-    const where: Record<string, unknown> = {}
-    if (statusFilter) {
-      where.status = statusFilter
-    }
-    if (q) {
-      where.OR = [
-        { name: { contains: q, mode: "insensitive" } },
-        { sn: { contains: q, mode: "insensitive" } },
-        { plantName: { contains: q, mode: "insensitive" } },
-      ]
-    }
+// Only look this far back for a device's "latest" reading — keeps the query on
+// recent hypertable chunks instead of scanning the whole history.
+const LATEST_READING_LOOKBACK = "30 days"
 
-    const total = await prisma.device.count({ where })
+/**
+ * Latest reading per device, resolved in the database (DISTINCT ON) so only one
+ * row per device crosses the wire — Prisma's own `distinct` would load every
+ * matching row and de-duplicate in memory.
+ */
+async function latestReadingsFor(deviceIds: string[]): Promise<Map<string, LatestReading>> {
+  const map = new Map<string, LatestReading>()
+  if (deviceIds.length === 0) return map
 
-    const devices = await prisma.device.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy:
-        options.sortField === "lastSeen"
-          ? { lastSeenAt: options.sortDir ?? "desc" }
-          : { name: options.sortDir ?? "asc" },
-    })
+  const rows = await prisma.$queryRaw<
+    { deviceId: string; acPower: number | null; yieldToday: number | null; ts: Date }[]
+  >`
+    SELECT DISTINCT ON ("deviceId") "deviceId", "acPower", "yieldToday", ts
+    FROM readings
+    WHERE "deviceId" = ANY(${deviceIds})
+      AND ts > NOW() - ${LATEST_READING_LOOKBACK}::interval
+    ORDER BY "deviceId", ts DESC
+  `
+  for (const r of rows) {
+    map.set(r.deviceId, { acPower: r.acPower, yieldToday: r.yieldToday, ts: r.ts })
+  }
+  return map
+}
 
-    const deviceIds = devices.map((d) => d.id)
-    let latestReadingsMap = new Map<string, any>()
+type DeviceRecord = Awaited<ReturnType<typeof prisma.device.findMany>>[number]
 
-    if (deviceIds.length > 0) {
-      try {
-        const latestReadings = await prisma.reading.findMany({
-          where: { deviceId: { in: deviceIds } },
-          orderBy: [{ deviceId: "asc" }, { ts: "desc" }],
-          distinct: ["deviceId"],
-          select: { deviceId: true, acPower: true, yieldToday: true, ts: true },
-        })
-        for (const r of latestReadings) {
-          latestReadingsMap.set(r.deviceId, r)
-        }
-      } catch (err) {
-        console.error("latestReadings fetch error:", err)
-      }
-    }
-
-    const mapped = devices.map((device) => ({
-      id: device.id,
-      sn: device.sn,
-      inverterSn: device.inverterSn,
-      name: device.name,
-      tokenId: device.tokenId,
-      plantName: device.plantName,
-      status: device.status,
-      lastSeenAt: device.lastSeenAt,
-      latestReading: latestReadingsMap.get(device.id) ?? null,
-    }))
-
-    if (options.sortField === "power" || options.sortField === "yield") {
-      const dir = options.sortDir === "asc" ? 1 : -1
-      mapped.sort((a, b) => {
-        const av =
-          options.sortField === "power"
-            ? (a.latestReading?.acPower ?? -1)
-            : (a.latestReading?.yieldToday ?? -1)
-        const bv =
-          options.sortField === "power"
-            ? (b.latestReading?.acPower ?? -1)
-            : (b.latestReading?.yieldToday ?? -1)
-        return (av - bv) * dir
-      })
-    }
-
-    const hasMore = skip + devices.length < total
-
-    return {
-      devices: mapped,
-      total,
-      page,
-      limit,
-      hasMore,
-    }
-  } catch (err) {
-    console.error("listDevicesPaginated error:", err)
-    return {
-      devices: [],
-      total: 0,
-      page: 1,
-      limit: options.limit ?? 20,
-      hasMore: false,
-    }
+function toDeviceRow(device: DeviceRecord, latest: LatestReading | undefined) {
+  return {
+    id: device.id,
+    sn: device.sn,
+    inverterSn: device.inverterSn,
+    name: device.name,
+    tokenId: device.tokenId,
+    plantName: device.plantName,
+    status: device.status,
+    lastSeenAt: device.lastSeenAt,
+    latestReading: latest ?? null,
   }
 }
 
-export const getDashboardStats = unstable_cache(
-  async () => {
-    try {
-      const [statusCounts, alarmCount, aggregate] = await Promise.all([
-        prisma.device.groupBy({ by: ["status"], _count: { _all: true } }),
-        prisma.alarm.count({ where: { resolvedAt: null } }),
-        prisma.$queryRaw<
-          { total_ac_power: number | null; total_yield_today: number | null }[]
-        >`
-          SELECT
-            SUM("acPower") AS total_ac_power,
-            SUM("yieldToday") AS total_yield_today
-          FROM (
-            SELECT DISTINCT ON ("deviceId") "acPower", "yieldToday"
-            FROM readings
-            WHERE ts > NOW() - INTERVAL '48 hours'
-            ORDER BY "deviceId", ts DESC
-          ) latest
-        `,
-      ])
+/**
+ * Paginated device list. Errors propagate to the caller (route handler / error
+ * boundary) — silently returning an empty list used to make a DB outage look
+ * like "no devices registered".
+ */
+export async function listDevicesPaginated(options: ListDevicesOptions = {}) {
+  const rawPage = Math.trunc(options.page ?? 1)
+  const rawLimit = Math.trunc(options.limit ?? 20)
+  const page = Number.isFinite(rawPage) ? Math.max(1, rawPage) : 1
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 20
+  const skip = (page - 1) * limit
+  const q = options.query?.trim()
+  const dir = options.sortDir === "desc" ? "desc" : "asc"
+  const statusFilter =
+    options.status && options.status !== "ALL"
+      ? (options.status as DeviceRecord["status"])
+      : undefined
 
-      const byStatus = Object.fromEntries(
-        statusCounts.map((s) => [s.status, s._count._all])
-      ) as Record<string, number>
+  const where: Prisma.DeviceWhereInput = {}
+  if (statusFilter) where.status = statusFilter
+  if (q) {
+    where.OR = [
+      { name: { contains: q, mode: "insensitive" } },
+      { sn: { contains: q, mode: "insensitive" } },
+      { plantName: { contains: q, mode: "insensitive" } },
+    ]
+  }
 
-      const online = byStatus.ONLINE ?? 0
-      const offline = byStatus.OFFLINE ?? 0
-      const alarm = byStatus.ALARM ?? 0
-      const unknown = byStatus.UNKNOWN ?? 0
+  const total = await prisma.device.count({ where })
 
-      return {
-        total: online + offline + alarm + unknown,
-        online,
-        offline,
-        alarm,
-        unknown,
-        activeAlarms: alarmCount,
-        totalAcPowerW: aggregate[0]?.total_ac_power ?? 0,
-        totalYieldTodayKwh: aggregate[0]?.total_yield_today ?? 0,
-      }
-    } catch (err) {
-      console.error("getDashboardStats error:", err)
-      return {
-        total: 0,
-        online: 0,
-        offline: 0,
-        alarm: 0,
-        unknown: 0,
-        activeAlarms: 0,
-        totalAcPowerW: 0,
-        totalYieldTodayKwh: 0,
-      }
+  // Power / yield live on the readings table, so a correct *global* sort has to
+  // rank every matching device by its latest reading before paginating. The
+  // fleet is a few hundred devices, so ranking in memory is cheap.
+  if (options.sortField === "power" || options.sortField === "yield") {
+    const field = options.sortField === "power" ? "acPower" : "yieldToday"
+    const all = await prisma.device.findMany({ where, orderBy: [{ name: "asc" }, { id: "asc" }] })
+    const latest = await latestReadingsFor(all.map((d) => d.id))
+    const sign = dir === "asc" ? 1 : -1
+
+    const ranked = all
+      .map((d) => ({ d, v: latest.get(d.id)?.[field] ?? null }))
+      .sort((x, y) => {
+        // Devices with no reading always sink to the bottom, either direction.
+        if (x.v == null && y.v == null) return 0
+        if (x.v == null) return 1
+        if (y.v == null) return -1
+        return (x.v - y.v) * sign
+      })
+      .slice(skip, skip + limit)
+
+    return {
+      devices: ranked.map(({ d }) => toDeviceRow(d, latest.get(d.id))),
+      total,
+      page,
+      limit,
+      hasMore: skip + ranked.length < total,
     }
-  },
-  ["dashboard-stats"],
-  { revalidate: 10 }
-)
+  }
+
+  const devices = await prisma.device.findMany({
+    where,
+    skip,
+    take: limit,
+    // `id` tiebreaker keeps pagination stable when sort keys repeat/are null.
+    orderBy:
+      options.sortField === "lastSeen"
+        ? [{ lastSeenAt: { sort: dir, nulls: "last" } }, { id: "asc" }]
+        : [{ name: dir }, { id: "asc" }],
+  })
+
+  const latest = await latestReadingsFor(devices.map((d) => d.id))
+
+  return {
+    devices: devices.map((d) => toDeviceRow(d, latest.get(d.id))),
+    total,
+    page,
+    limit,
+    hasMore: skip + devices.length < total,
+  }
+}
 
 // Start of "today" in Uzbekistan (UTC+5) — inverters reset yieldToday at
 // their local midnight, so day-scoped aggregates must use this boundary.
@@ -203,33 +177,88 @@ function uzDayStart(): Date {
   )
 }
 
+// A reading older than this no longer describes "current" output.
+const CURRENT_POWER_WINDOW_MIN = 45
+
+// Errors intentionally propagate: unstable_cache doesn't cache a throw, and the
+// dashboard error boundary reports it instead of showing a misleading all-zero
+// fleet.
+export const getDashboardStats = unstable_cache(
+  async () => {
+    const dayStart = uzDayStart()
+    const [statusCounts, alarmCount, power, yieldAgg] = await Promise.all([
+      prisma.device.groupBy({ by: ["status"], _count: { _all: true } }),
+      prisma.alarm.count({ where: { resolvedAt: null } }),
+      // Current output: only readings recent enough to still be "now".
+      prisma.$queryRaw<{ total_ac_power: number | null }[]>`
+        SELECT SUM("acPower") AS total_ac_power
+        FROM (
+          SELECT DISTINCT ON ("deviceId") "acPower"
+          FROM readings
+          WHERE ts > NOW() - make_interval(mins => ${CURRENT_POWER_WINDOW_MIN}::int)
+          ORDER BY "deviceId", ts DESC
+        ) latest
+      `,
+      // Today's energy: each device's latest yieldToday since UZ midnight, so a
+      // device that has been offline since yesterday doesn't leak yesterday's
+      // total into today's figure.
+      prisma.$queryRaw<{ total_yield_today: number | null }[]>`
+        SELECT SUM("yieldToday") AS total_yield_today
+        FROM (
+          SELECT DISTINCT ON ("deviceId") "yieldToday"
+          FROM readings
+          WHERE ts >= ${dayStart}
+          ORDER BY "deviceId", ts DESC
+        ) latest
+      `,
+    ])
+
+    const byStatus = Object.fromEntries(
+      statusCounts.map((s) => [s.status, s._count._all])
+    ) as Record<string, number>
+
+    const online = byStatus.ONLINE ?? 0
+    const offline = byStatus.OFFLINE ?? 0
+    const alarm = byStatus.ALARM ?? 0
+    const unknown = byStatus.UNKNOWN ?? 0
+
+    return {
+      total: online + offline + alarm + unknown,
+      online,
+      offline,
+      alarm,
+      unknown,
+      activeAlarms: alarmCount,
+      totalAcPowerW: power[0]?.total_ac_power ?? 0,
+      totalYieldTodayKwh: yieldAgg[0]?.total_yield_today ?? 0,
+    }
+  },
+  ["dashboard-stats"],
+  { revalidate: 10 }
+)
+
 /**
  * Fleet-wide AC power over the last `hours`, in 30-minute buckets.
  */
 export const getFleetPowerCurve = unstable_cache(
   async (hours = 24) => {
-    try {
-      const rows = await prisma.$queryRaw<{ bucket: Date; total_w: number }[]>`
-        SELECT bucket, SUM(avg_w)::float AS total_w
-        FROM (
-          SELECT
-            to_timestamp(floor(extract(epoch FROM ts) / 1800) * 1800) AS bucket,
-            "deviceId",
-            AVG("acPower") AS avg_w
-          FROM readings
-          WHERE ts > NOW() - make_interval(hours => ${hours}::int)
-            AND "acPower" IS NOT NULL
-          GROUP BY 1, 2
-        ) per_device
-        GROUP BY bucket
-        ORDER BY bucket
-      `
+    const rows = await prisma.$queryRaw<{ bucket: Date; total_w: number }[]>`
+      SELECT bucket, SUM(avg_w)::float AS total_w
+      FROM (
+        SELECT
+          to_timestamp(floor(extract(epoch FROM ts) / 1800) * 1800) AS bucket,
+          "deviceId",
+          AVG("acPower") AS avg_w
+        FROM readings
+        WHERE ts > NOW() - make_interval(hours => ${hours}::int)
+          AND "acPower" IS NOT NULL
+        GROUP BY 1, 2
+      ) per_device
+      GROUP BY bucket
+      ORDER BY bucket
+    `
 
-      return rows.map((r) => ({ ts: r.bucket.toISOString(), totalW: r.total_w }))
-    } catch (err) {
-      console.error("getFleetPowerCurve error:", err)
-      return []
-    }
+    return rows.map((r) => ({ ts: r.bucket.toISOString(), totalW: r.total_w }))
   },
   ["fleet-power-curve"],
   { revalidate: 15 }
@@ -238,28 +267,23 @@ export const getFleetPowerCurve = unstable_cache(
 /** Today's most productive devices (by max yieldToday since UZ midnight). */
 export const getTopProducersToday = unstable_cache(
   async (limit = 5) => {
-    try {
-      const dayStart = uzDayStart()
-      return await prisma.$queryRaw<
-        { name: string; sn: string; yield_kwh: number | null; peak_w: number | null }[]
-      >`
-        SELECT d.name, d.sn,
-               r."yieldToday"::float AS yield_kwh,
-               r."acPower"::float AS peak_w
-        FROM (
-          SELECT DISTINCT ON ("deviceId") "deviceId", "yieldToday", "acPower"
-          FROM readings
-          WHERE ts >= ${dayStart} AND "yieldToday" IS NOT NULL
-          ORDER BY "deviceId", "yieldToday" DESC
-        ) r
-        JOIN devices d ON d.id = r."deviceId"
-        ORDER BY yield_kwh DESC
-        LIMIT ${limit}
-      `
-    } catch (err) {
-      console.error("getTopProducersToday error:", err)
-      return []
-    }
+    const dayStart = uzDayStart()
+    return prisma.$queryRaw<
+      { name: string; sn: string; yield_kwh: number | null; peak_w: number | null }[]
+    >`
+      SELECT d.name, d.sn,
+             r."yieldToday"::float AS yield_kwh,
+             r."acPower"::float AS peak_w
+      FROM (
+        SELECT DISTINCT ON ("deviceId") "deviceId", "yieldToday", "acPower"
+        FROM readings
+        WHERE ts >= ${dayStart} AND "yieldToday" IS NOT NULL
+        ORDER BY "deviceId", "yieldToday" DESC
+      ) r
+      JOIN devices d ON d.id = r."deviceId"
+      ORDER BY yield_kwh DESC
+      LIMIT ${limit}
+    `
   },
   ["top-producers-today"],
   { revalidate: 15 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef } from "react"
 
 interface UseInfiniteScrollOptions {
   onLoadMore: () => void | Promise<void>
@@ -17,38 +17,45 @@ export function useInfiniteScroll({
   onLoadMore,
   hasMore,
   isLoading,
-  threshold = 0.5,
+  threshold = 0.1,
 }: UseInfiniteScrollOptions) {
   const sentinelRef = useRef<HTMLDivElement | null>(null)
-  const onLoadMoreRef = useRef(onLoadMore)
-  onLoadMoreRef.current = onLoadMore
 
-  const handleIntersect = useCallback(
-    (entries: IntersectionObserverEntry[]) => {
-      const target = entries[0]
-      if (target?.isIntersecting && hasMore && !isLoading) {
-        onLoadMoreRef.current()
-      }
-    },
-    [hasMore, isLoading]
-  )
+  // Keep the latest values in refs so the observer callback never goes stale.
+  // Refs are written in an effect (not during render) to stay concurrent-safe.
+  const onLoadMoreRef = useRef(onLoadMore)
+  const hasMoreRef = useRef(hasMore)
+  const isLoadingRef = useRef(isLoading)
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore
+    hasMoreRef.current = hasMore
+    isLoadingRef.current = isLoading
+  })
 
   useEffect(() => {
     const node = sentinelRef.current
     if (!node || !hasMore) return
 
-    const observer = new IntersectionObserver(handleIntersect, {
-      root: null,
-      rootMargin: "200px", // Trigger 200px before scrolling into view for smooth prefetching
-      threshold,
-    })
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const target = entries[0]
+        if (target?.isIntersecting && hasMoreRef.current && !isLoadingRef.current) {
+          onLoadMoreRef.current()
+        }
+      },
+      {
+        root: null,
+        rootMargin: "150px", // Trigger 150px before scrolling into view
+        threshold,
+      }
+    )
 
     observer.observe(node)
 
     return () => {
       observer.disconnect()
     }
-  }, [handleIntersect, hasMore])
+  }, [threshold, hasMore])
 
   return { sentinelRef }
 }
