@@ -158,7 +158,7 @@ export default async function DashboardPage() {
         </div>
 
         {devices.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-neutral-200 py-16 text-center dark:border-neutral-800">
+          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-neutral-200 py-16 text-center dark:border-neutral-800 ">
             <Server className="size-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">Hali qurilma qo&apos;shilmagan</p>
             <Link href="/devices" className="text-sm font-medium underline underline-offset-4">

@@ -1,11 +1,11 @@
-import Link from "next/link"
-import { CalendarClock } from "lucide-react"
+import Link from "next/link";
+import { CalendarClock } from "lucide-react";
 import {
   listDailySummariesForDate,
   listReportDates,
   uzTodayStr,
-} from "@/server/devices"
-import { Badge } from "@/components/ui/badge"
+} from "@/server/devices";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -13,27 +13,27 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { DownloadReportButton, type ReportRow } from "./download-report-button"
-import { ReportDatePicker } from "./report-date-picker"
+} from "@/components/ui/table";
+import { DownloadReportButton, type ReportRow } from "./download-report-button";
+import { ReportDatePicker } from "./report-date-picker";
 
-export const dynamic = "force-dynamic"
+export const dynamic = "force-dynamic";
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function ReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>
+  searchParams: Promise<{ date?: string }>;
 }) {
-  const { date } = await searchParams
-  const today = uzTodayStr()
-  const selected = date && DATE_RE.test(date) ? date : today
+  const { date } = await searchParams;
+  const today = uzTodayStr();
+  const selected = date && DATE_RE.test(date) ? date : today;
 
   const [summaries, availableDates] = await Promise.all([
     listDailySummariesForDate(selected),
     listReportDates(90),
-  ])
+  ]);
 
   const reportRows: ReportRow[] = summaries.map((s) => ({
     id: s.id,
@@ -44,31 +44,36 @@ export default async function ReportsPage({
     peakAcPowerW: s.peakAcPowerW,
     wasOnline: s.wasOnline,
     alarmCount: s.alarmCount,
-  }))
+  }));
 
-  const dayYield = summaries.reduce((s, r) => s + (r.totalYieldKwh ?? 0), 0)
-  const dayOnline = summaries.filter((r) => r.wasOnline).length
-  const dayAlarms = summaries.reduce((s, r) => s + r.alarmCount, 0)
+  const dayYield = summaries.reduce((s, r) => s + (r.totalYieldKwh ?? 0), 0);
+  const dayOnline = summaries.filter((r) => r.wasOnline).length;
+  const dayAlarms = summaries.reduce((s, r) => s + r.alarmCount, 0);
 
-  const heading = new Date(`${selected}T00:00:00.000Z`).toLocaleDateString("uz-UZ", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  })
+  const heading = new Date(`${selected}T00:00:00.000Z`).toLocaleDateString(
+    "uz-UZ",
+    {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    },
+  );
 
-  const isToday = selected === today
+  const isToday = selected === today;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="flex flex-col gap-1">
-            <h1 className="text-xl font-semibold tracking-tight">Kunlik hisobotlar</h1>
+            <h1 className="text-xl font-semibold tracking-tight">
+              Kunlik hisobotlar
+            </h1>
             <p className="text-muted-foreground text-sm">
-              Har kuni O&apos;zbekistonda quyosh botganda barcha qurilmalar uchun avtomatik
-              hisoblanadi
+              Har kuni O&apos;zbekistonda quyosh botganda barcha qurilmalar
+              uchun avtomatik hisoblanadi
             </p>
           </div>
           <DownloadReportButton rows={reportRows} />
@@ -88,13 +93,17 @@ export default async function ReportsPage({
         <h2 className="text-sm font-semibold capitalize tracking-tight">
           {heading}
           {isToday && (
-            <span className="text-muted-foreground ml-2 font-normal">(bugun)</span>
+            <span className="text-muted-foreground ml-2 font-normal">
+              (bugun)
+            </span>
           )}
         </h2>
         {summaries.length > 0 && (
           <p className="text-muted-foreground text-xs tabular-nums">
             Jami:{" "}
-            <span className="font-medium text-foreground">{dayYield.toFixed(1)} kWh</span>
+            <span className="font-medium text-foreground">
+              {dayYield.toFixed(1)} kWh
+            </span>
             {" · "}Onlayn: {dayOnline}/{summaries.length}
             {dayAlarms > 0 && (
               <>
@@ -140,10 +149,14 @@ export default async function ReportsPage({
                   </Link>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {row.totalYieldKwh != null ? `${row.totalYieldKwh.toFixed(1)} kWh` : "—"}
+                  {row.totalYieldKwh != null
+                    ? `${row.totalYieldKwh.toFixed(1)} kWh`
+                    : "—"}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {row.peakAcPowerW != null ? `${row.peakAcPowerW.toFixed(0)} W` : "—"}
+                  {row.peakAcPowerW != null
+                    ? `${row.peakAcPowerW.toFixed(0)} W`
+                    : "—"}
                 </TableCell>
                 <TableCell>
                   <Badge variant={row.wasOnline ? "secondary" : "outline"}>
@@ -165,5 +178,5 @@ export default async function ReportsPage({
         </Table>
       )}
     </div>
-  )
+  );
 }

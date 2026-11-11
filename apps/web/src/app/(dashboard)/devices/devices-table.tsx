@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -113,6 +113,9 @@ export function DevicesTable({
   const [sortField, setSortField] = useState<SortField>("name")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
 
+  // Synchronous lock to prevent concurrent/race condition requests
+  const inFlightRef = useRef(false)
+
   // Debounced search query
   const [debouncedQuery, setDebouncedQuery] = useState("")
   useEffect(() => {
@@ -129,6 +132,8 @@ export function DevicesTable({
 
   // Fetch page 1 when search/filter/sort changes
   const fetchFirstPage = useCallback(async () => {
+    if (inFlightRef.current) return
+    inFlightRef.current = true
     setIsLoading(true)
     try {
       const params = new URLSearchParams({
@@ -146,19 +151,23 @@ export function DevicesTable({
         setTotalCount(data.total ?? data.devices.length)
         setPage(1)
         setHasMore(data.hasMore ?? false)
+      } else {
+        setHasMore(false)
       }
     } catch (err) {
       console.error("Qurilmalarni yuklashda xatolik:", err)
+      setHasMore(false)
     } finally {
+      inFlightRef.current = false
       setIsLoading(false)
     }
   }, [debouncedQuery, statusFilter, sortField, sortDir])
 
   // Re-fetch initial page on filter change (skip first render if using initial props)
-  const [isFirstRender, setIsFirstRender] = useState(true)
+  const isFirstRender = useRef(true)
   useEffect(() => {
-    if (isFirstRender) {
-      setIsFirstRender(false)
+    if (isFirstRender.current) {
+      isFirstRender.current = false
       return
     }
     fetchFirstPage()
@@ -166,7 +175,8 @@ export function DevicesTable({
 
   // Load next batch on scroll
   const loadMore = useCallback(async () => {
-    if (isLoadingMore || !hasMore || isLoading) return
+    if (inFlightRef.current || isLoadingMore || !hasMore || isLoading) return
+    inFlightRef.current = true
     setIsLoadingMore(true)
     try {
       const nextPage = page + 1
@@ -188,10 +198,14 @@ export function DevicesTable({
         })
         setPage(nextPage)
         setHasMore(data.hasMore ?? false)
+      } else {
+        setHasMore(false)
       }
     } catch (err) {
       console.error("Keyingi sahifani yuklashda xatolik:", err)
+      setHasMore(false)
     } finally {
+      inFlightRef.current = false
       setIsLoadingMore(false)
     }
   }, [page, isLoadingMore, hasMore, isLoading, debouncedQuery, statusFilter, sortField, sortDir])
@@ -432,7 +446,7 @@ export function DevicesTable({
         </Table>
 
         {/* Sentinel Trigger Element for YouTube-style infinite scroll */}
-        <div ref={sentinelRef} className="h-4 w-full" />
+        {hasMore && <div ref={sentinelRef} className="h-4 w-full" />}
       </div>
 
       {/* Infinite Scroll Footer Info */}
