@@ -5,7 +5,7 @@
 | Stage | Trigger | What runs |
 |-------|---------|-----------|
 | **CI** (`.github/workflows/ci.yml`) | every push / PR | install → prisma generate → lint → typecheck (web + worker) → unit tests → `next build` |
-| **CD** (`.github/workflows/deploy.yml`) | push to `main` | SSH to the VPS → build images → migrate → restart the Docker stack |
+| **CD** (`.github/workflows/deploy.yml`) | CI passed on `main` | SSH to the VPS → build images → migrate → restart the Docker stack |
 
 Everything runs in Docker on the VPS: **postgres (TimescaleDB) + redis + web + worker**, optionally fronted by **Caddy** for automatic HTTPS.
 
@@ -36,10 +36,13 @@ Everything runs in Docker on the VPS: **postgres (TimescaleDB) + redis + web + w
 
    AUTH_SECRET="<openssl rand -base64 32>"
    NEXTAUTH_URL="https://solax.example.com"
+   # Required for PIN login (no built-in default). Digits only, 6+.
+   ADMIN_PIN="<your own PIN>"
 
    SOLAX_TOKEN_ID="<your token>"
    SOLAX_API_BASE_URL="https://www.solaxcloud.com:9443/proxy/api"
-   POLL_INTERVAL_SECONDS="1200"
+   # 178 devices / 9 per min ≈ 20 min per cycle: leave real headroom.
+   POLL_INTERVAL_SECONDS="1500"
    SOLAX_RATE_LIMIT_PER_MIN="9"
 
    # Operator alerts + backups (optional)
@@ -79,7 +82,11 @@ Repo → Settings → Secrets and variables → Actions:
 | `VPS_PORT` | ssh port (usually `22`) |
 | `VPS_APP_DIR` | `/opt/solax` |
 
-Once set, every push to `main` deploys automatically.
+Once set, `main` deploys automatically after CI succeeds on it.
+
+> **Never commit SSH keys.** `id_*`, `*.pem`, `*.key` are git-ignored. If a
+> private key was ever committed, treat it as compromised: generate a new one,
+> replace it in `authorized_keys` and `VPS_SSH_KEY`, and remove the old one.
 
 ---
 

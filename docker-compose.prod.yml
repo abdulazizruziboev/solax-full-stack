@@ -58,6 +58,8 @@ services:
       dockerfile: worker/Dockerfile
     container_name: solax_worker
     restart: unless-stopped
+    # Give the in-flight poll job time to finish on `docker compose stop/up`.
+    stop_grace_period: 30s
     env_file: .env
     depends_on:
       postgres:

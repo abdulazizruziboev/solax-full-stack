@@ -15,6 +15,8 @@
 # Requires in .env: DATABASE_URL, TELEGRAM_BOT_TOKEN, and one of
 # TELEGRAM_BACKUP_CHAT_ID / TELEGRAM_CHAT_ID.
 #
+# NOTE: the dump contains password hashes and SolaxCloud tokenIds — treat the
+# Telegram chat as sensitive (private chat only).
 # NOTE: .env itself (secrets) is intentionally NOT sent here — keep it in a
 # password manager, not a chat.
 
@@ -37,14 +39,15 @@ BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/backups}"
 KEEP="${BACKUP_KEEP:-7}"
 CHAT_ID="${TELEGRAM_BACKUP_CHAT_ID:-${TELEGRAM_CHAT_ID:-}}"
 
-# --- parse DATABASE_URL: postgresql://user:pass@host:port/db -----------------
+# --- connection string ------------------------------------------------------
+# pg_dump runs inside the DB container, where the host in DATABASE_URL (the
+# compose service name or localhost) resolves to the database itself. Passing
+# the whole URL avoids hand-parsing it (passwords containing @ or : broke the
+# old user/pass splitting). Any ?query suffix (e.g. ?schema=public) is not
+# valid for pg_dump, so strip it.
 url="${DATABASE_URL:?DATABASE_URL missing}"
-creds="${url#*://}"              # user:pass@host:port/db
-userpass="${creds%%@*}"         # user:pass
-DB_USER="${userpass%%:*}"
-DB_PASS="${userpass#*:}"
-DB_NAME="${url##*/}"
-DB_NAME="${DB_NAME%%\?*}"        # strip any ?query
+DB_URL="${url%%\?*}"
+DB_NAME="${DB_URL##*/}"
 
 mkdir -p "$BACKUP_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -52,17 +55,23 @@ OUT="$BACKUP_DIR/solax-$STAMP.sql.gz"
 
 # --- dump (inside the container, so no host pg client needed) -----------------
 echo "[backup] dumping $DB_NAME from $CONTAINER ..."
-docker exec -e PGPASSWORD="$DB_PASS" "$CONTAINER" \
-  pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges \
+docker exec "$CONTAINER" \
+  pg_dump --dbname="$DB_URL" --no-owner --no-privileges \
   | gzip -9 > "$OUT"
 
 SIZE="$(du -h "$OUT" | cut -f1)"
 echo "[backup] wrote $OUT ($SIZE)"
 
 # --- ship to Telegram ---------------------------------------------------------
-if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "$CHAT_ID" ]; then
+# Bot API limit for uploads is 50 MB; stay safely under it and say so loudly
+# instead of letting off-site backups silently stop working as the DB grows.
+MAX_TELEGRAM_BYTES=$((45 * 1024 * 1024))
+OUT_BYTES="$(stat -c %s "$OUT")"
+if [ "$OUT_BYTES" -gt "$MAX_TELEGRAM_BYTES" ]; then
+  echo "[backup] WARNING: dump is $SIZE — too large for Telegram (limit ~45 MB). NOT shipped off-site; copy it elsewhere (rsync/S3) and consider a retention policy on readings." >&2
+elif [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "$CHAT_ID" ]; then
   echo "[backup] sending to Telegram ..."
-  http_code="$(curl -s -o /dev/null -w '%{http_code}' \
+  http_code="$(curl -sS -o /dev/null -w '%{http_code}' \
     -F "chat_id=$CHAT_ID" \
     -F "document=@$OUT" \
     -F "caption=🗄️ Solax DB backup · $STAMP · $SIZE" \
