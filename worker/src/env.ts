@@ -6,7 +6,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // `override: true` is essential: importing @solax/db initializes Prisma,
 // which auto-loads packages/db/.env into process.env first. Without override,
 // those (possibly stale) values would win over the real root .env.
-config({ path: path.resolve(__dirname, "../../.env"), override: true })
+// SOLAX_ENV_FILE lets tests / one-off runs point at a different env file.
+config({
+  path: process.env.SOLAX_ENV_FILE ?? path.resolve(__dirname, "../../.env"),
+  override: true,
+})
 
 function required(name: string): string {
   const value = process.env[name]
@@ -21,7 +25,6 @@ export const env = {
   solaxTokenId: process.env.SOLAX_TOKEN_ID ?? "",
   solaxBaseUrl: process.env.SOLAX_API_BASE_URL,
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 1500),
-  pollConcurrency: Number(process.env.POLL_CONCURRENCY ?? 3),
   // SolaxCloud free tier allows ~10 API calls/minute per token and rejects
   // bursts. We space requests evenly at this rate (see processor.ts).
   rateLimitPerMin: Number(process.env.SOLAX_RATE_LIMIT_PER_MIN ?? 8),

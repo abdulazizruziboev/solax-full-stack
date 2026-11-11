@@ -26,3 +26,17 @@ export interface PollJobData {
   sn: string
   tokenId: string | null
 }
+
+pollQueue.on("error", (err) => {
+  console.error("[queue] redis error:", err.message)
+})
+
+/**
+ * Drops devices that already have a poll waiting, so a restart, a slow cycle or
+ * repeated "refresh" clicks can't stack duplicate jobs for the same inverter.
+ */
+export async function filterAlreadyQueued<T extends { id: string }>(devices: T[]): Promise<T[]> {
+  const waiting = await pollQueue.getJobs(["waiting", "prioritized", "delayed"])
+  const queued = new Set(waiting.map((j) => (j.data as PollJobData).deviceId))
+  return devices.filter((d) => !queued.has(d.id))
+}

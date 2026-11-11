@@ -21,6 +21,14 @@ const IRRADIANCE_FRACTION = 0.3
 const LOW_YIELD_INDEX = 0.85 // below 85% of peer median = under-producing
 // Baseline adapts slowly once established so a genuine new fault isn't absorbed.
 const BASELINE_ALPHA = 0.1
+// One day contributes at most this many samples toward a baseline's "trusted"
+// count, so a baseline needs several distinct days (MIN_BASELINE_SAMPLES /
+// cap) of data — not a single sunny day — before it can raise alarms.
+const BASELINE_DAILY_SAMPLE_CAP = 6
+// A trusted baseline is NOT updated on a day when the string looks faulty
+// (share fell below this fraction of its baseline). Otherwise a blown fuse
+// would drag the "normal" down ~10%/day and the alarm would clear itself.
+const BASELINE_FAULT_RATIO = 0.85
 
 interface ReadingRow {
   ts: Date
@@ -149,13 +157,20 @@ export async function runDailyAnalysis(forDate: Date = new Date()): Promise<numb
       if (!existing) {
         const s = summarizeShares([todayShare])
         await prisma.stringBaseline.create({
-          data: { deviceId: device.id, stringIndex: idx, medianShare: todayShare, madShare: todayMad, sampleCount: d.sampleCount },
+          data: { deviceId: device.id, stringIndex: idx, medianShare: todayShare, madShare: todayMad, sampleCount: Math.min(d.sampleCount, BASELINE_DAILY_SAMPLE_CAP) },
         })
         baseByIdx.set(idx, { ...s, deviceId: device.id, stringIndex: idx, id: "", updatedAt: new Date() } as never)
+      } else if (
+        isBaselineReady(existing) &&
+        existing.medianShare > 0 &&
+        todayShare / existing.medianShare < BASELINE_FAULT_RATIO
+      ) {
+        // Suspected fault day — keep the learned normal untouched.
+        continue
       } else {
         const newMedian = existing.medianShare * (1 - BASELINE_ALPHA) + todayShare * BASELINE_ALPHA
         const newMad = existing.madShare * (1 - BASELINE_ALPHA) + todayMad * BASELINE_ALPHA
-        const newCount = existing.sampleCount + d.sampleCount
+        const newCount = existing.sampleCount + Math.min(d.sampleCount, BASELINE_DAILY_SAMPLE_CAP)
         await prisma.stringBaseline.update({
           where: { id: existing.id },
           data: { medianShare: newMedian, madShare: newMad, sampleCount: newCount },

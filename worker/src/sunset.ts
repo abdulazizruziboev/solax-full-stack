@@ -51,6 +51,18 @@ export function isDaytime(instant: Date = new Date()): boolean {
   return instant.getTime() > sunrise.getTime() && instant.getTime() < sunset.getTime()
 }
 
+/**
+ * True when the sun is high enough (default ≥10° above the horizon) for an
+ * inverter to be genuinely producing. Near sunrise/sunset inverters legitimately
+ * output ~0 W for the first/last stretch of "daytime", so zero-power and
+ * frozen-value checks use this stricter window to avoid false CRITICAL alarms.
+ */
+export function isProductiveDaytime(instant: Date = new Date(), minAltitudeDeg = 10): boolean {
+  // suncalc v2 reports altitude in degrees (v1 used radians).
+  const { altitude } = SunCalc.getPosition(instant, UZ_LAT, UZ_LON)
+  return altitude >= minAltitudeDeg
+}
+
 export function getSunsetTime(date: Date): Date {
   const sunset = SunCalc.getTimes(date, UZ_LAT, UZ_LON).sunset
   // Uzbekistan's latitude (~41°N) never hits polar day/night, so sunset is

@@ -1,5 +1,5 @@
 import { prisma } from "@solax/db"
-import { pollQueue, type PollJobData } from "./queue.js"
+import { pollQueue, filterAlreadyQueued, type PollJobData } from "./queue.js"
 import { env } from "./env.js"
 
 /**
@@ -8,9 +8,12 @@ import { env } from "./env.js"
  * SolaxCloud's rate limit, so we can safely enqueue all devices at once.
  */
 export async function enqueueAllDevices(): Promise<number> {
-  const devices = await prisma.device.findMany({
+  const all = await prisma.device.findMany({
     select: { id: true, sn: true, tokenId: true },
   })
+  // If the previous cycle hasn't drained yet, don't pile a second job per device.
+  const devices = await filterAlreadyQueued(all)
+  if (devices.length === 0) return 0
 
   await pollQueue.addBulk(
     devices.map((device) => ({

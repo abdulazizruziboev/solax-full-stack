@@ -7,7 +7,7 @@ import { prisma } from "@solax/db"
 import type { SolaxRealtime } from "@solax/shared"
 import { runBinaryChecks, type BinaryFinding } from "./analysis/binaryChecks.js"
 import { isFrozen } from "./analysis/dataQuality.js"
-import { isDaytime } from "./sunset.js"
+import { isProductiveDaytime } from "./sunset.js"
 
 type AlarmCategory = "SYSTEM" | "DATA_QUALITY" | "PERFORMANCE" | "STRING" | "FUSE"
 type AlarmSeverity = "INFO" | "WARNING" | "CRITICAL"
@@ -61,7 +61,7 @@ export async function runLiveDetection(
   reading: SolaxRealtime
 ): Promise<CreatedAlarm[]> {
   const raw = reading as unknown as Record<string, unknown>
-  const day = isDaytime()
+  const day = isProductiveDaytime()
 
   const findings = runBinaryChecks({
     acPowerW: reading.acpower ?? null,

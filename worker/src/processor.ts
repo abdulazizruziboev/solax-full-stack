@@ -25,19 +25,27 @@ async function handlePollJob(job: Job<PollJobData>): Promise<void> {
     // reading's own timestamp — not API success — decides online/offline.
     const fresh = isReadingFresh(reading, env.staleMinutes)
 
+    // A stale reading is SolaxCloud's cached last-known value, not new data.
+    // Storing it as a fresh row (ts = now) would inflate fleet power/yield and
+    // fake "the device reported today", so only fresh readings are persisted.
+    // Status is still updated either way.
     await prisma.$transaction([
-      prisma.reading.create({
-        data: {
-          deviceId,
-          acPower: reading.acpower ?? null,
-          yieldToday: reading.yieldtoday ?? null,
-          yieldTotal: reading.yieldtotal ?? null,
-          batterySoc: reading.soc ?? null,
-          gridPower: reading.gridpower ?? null,
-          feedInPower: reading.feedinpower ?? null,
-          raw: reading as unknown as object,
-        },
-      }),
+      ...(fresh
+        ? [
+            prisma.reading.create({
+              data: {
+                deviceId,
+                acPower: reading.acpower ?? null,
+                yieldToday: reading.yieldtoday ?? null,
+                yieldTotal: reading.yieldtotal ?? null,
+                batterySoc: reading.soc ?? null,
+                gridPower: reading.gridpower ?? null,
+                feedInPower: reading.feedinpower ?? null,
+                raw: reading as unknown as object,
+              },
+            }),
+          ]
+        : []),
       prisma.device.update({
         where: { id: deviceId },
         data: {
@@ -46,11 +54,14 @@ async function handlePollJob(job: Job<PollJobData>): Promise<void> {
           ...(fresh ? { lastSeenAt: new Date() } : {}),
         },
       }),
-      // API reachable again — clear the offline/API-error (non-detection) alarms.
+      // API reachable again — clear the offline/API-error alarms. Scoped to the
+      // SYSTEM category so the daily-analysis alarms (FUSE / STRING /
+      // PERFORMANCE) and live-detection codes are left to their own owners.
       prisma.alarm.updateMany({
         where: {
           deviceId,
           resolvedAt: null,
+          category: "SYSTEM",
           code: { notIn: [...LIVE_DETECTION_CODES] },
         },
         data: { resolvedAt: new Date() },
@@ -68,7 +79,10 @@ async function handlePollJob(job: Job<PollJobData>): Promise<void> {
 
     console.log(`[processor] OK ${sn} acpower=${reading.acpower ?? "-"}W ${fresh ? "" : "(offline/stale)"}`)
   } catch (err) {
-    await handlePollFailure(deviceId, sn, err)
+    // Never let a bookkeeping failure (e.g. DB hiccup) mask the original error.
+    await handlePollFailure(deviceId, sn, err).catch((failureErr) =>
+      console.error(`[processor] could not record failure for ${sn}:`, failureErr)
+    )
     throw err
   }
 }
@@ -122,6 +136,11 @@ export function startProcessor(): Worker<PollJobData> {
       max: 1,
       duration: spacingMs,
     },
+  })
+
+  // Without an 'error' listener a Redis hiccup would be an unhandled event.
+  worker.on("error", (err) => {
+    console.error("[processor] worker error:", err.message)
   })
 
   worker.on("failed", (job, err) => {

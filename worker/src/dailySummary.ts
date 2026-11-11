@@ -65,8 +65,8 @@ export async function runDailySummary(forDate: Date = new Date()): Promise<numbe
 }
 
 export function startDailySummaryScheduler(): void {
-  const schedule = () => {
-    const next = getNextSunset()
+  const schedule = (from: Date = new Date()) => {
+    const next = getNextSunset(from)
     const delayMs = next.getTime() - Date.now()
 
     console.log(
@@ -80,7 +80,9 @@ export function startDailySummaryScheduler(): void {
         .then(() => runDailyAnalysis())
         .then((count) => console.log(`[daily-analysis] analyzed ${count} devices`))
         .catch((err) => console.error("[daily-summary/analysis] failed:", err))
-        .finally(schedule)
+        // Node timers can fire a hair early; scheduling from "a minute from now"
+        // guarantees we pick tomorrow's sunset instead of re-running today's.
+        .finally(() => schedule(new Date(Date.now() + 60_000)))
     }, delayMs)
   }
 
