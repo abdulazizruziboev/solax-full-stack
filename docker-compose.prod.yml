@@ -67,6 +67,15 @@ services:
       redis:
         condition: service_healthy
 
+  cpmtool_web:
+    build:
+      context: ../cpmtooluz
+      dockerfile: Dockerfile
+    container_name: cpmtool_web
+    restart: unless-stopped
+    env_file: ../cpmtooluz/.env
+
+
   caddy:
     image: caddy:2-alpine
     container_name: solax_caddy
@@ -88,3 +97,4 @@ volumes:
   solax_redis_data:
   caddy_data:
   caddy_config:
+

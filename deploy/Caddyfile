@@ -1,16 +1,17 @@
-# Auto-HTTPS reverse proxy. Set DOMAIN in .env (e.g. solax.example.com) with an
-# A record pointing at the VPS; Caddy fetches and renews the TLS cert itself.
-# Falls back to :80 if DOMAIN is unset.
-{$DOMAIN::80} {
-	encode gzip
+# ----------------------------------------------------
+# 1. Asosiy domen: solar-pro.uz (Solax Cloud)
+# ----------------------------------------------------
+solar-pro.uz {
+    encode zstd gzip
+    reverse_proxy solax_web:3000
+}
 
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
-	}
 
-	reverse_proxy web:3000
+# ----------------------------------------------------
+# 2. Frontend & Backend: app-tool.solar-pro.uz (CPMToolUz)
+# ----------------------------------------------------
+app-tool.solar-pro.uz, api-tool.solar-pro.uz, cpmtool.uz, www.cpmtool.uz, dash.cpmtool.uz {
+    encode zstd gzip
+    # Docker ichidan VPS'ning asosiy tizimidagi (PM2) 4000 portga chiqish uchun:
+    reverse_proxy cpmtool_web:4005
 }
